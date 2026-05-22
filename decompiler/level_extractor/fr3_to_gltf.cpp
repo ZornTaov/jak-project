@@ -12,7 +12,7 @@
 #include "third-party/tiny_gltf/tiny_gltf.h"
 
 namespace {
-
+// this is a test
 /*!
  * Remove 4096 meter scaling from a transformation matrix.
  */
