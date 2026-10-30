@@ -194,14 +194,31 @@ int make_position_buffer_accessor(const std::vector<T>& vertices, tinygltf::Mode
 
   // and fill it
   u8* buffer_ptr = buffer.data.data();
+  // track min/max for accessor
+  math::Vector3f min = {std::numeric_limits<float>::max(), 
+                        std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max()};
+  math::Vector3f max = {std::numeric_limits<float>::lowest(), 
+                        std::numeric_limits<float>::lowest(),
+                        std::numeric_limits<float>::lowest()};
   for (const auto& vtx : vertices) {
     if constexpr (std::is_same<T, tfrag3::MercVertex>::value) {
-      float xyz[3] = {vtx.pos[0] / 4096.f, vtx.pos[1] / 4096.f, vtx.pos[2] / 4096.f};
-      memcpy(buffer_ptr, xyz, 3 * sizeof(float));
+      math::Vector3f xyz = {vtx.pos[0] / 4096.f, vtx.pos[1] / 4096.f, vtx.pos[2] / 4096.f};
+      // track min/max for accessor
+      for (int i = 0; i < 3; i++) {
+        min[i] = std::min(min[i], xyz[i]);
+        max[i] = std::max(max[i], xyz[i]);
+      }
+      memcpy(buffer_ptr, xyz.data(), 3 * sizeof(float));
       buffer_ptr += 3 * sizeof(float);
     } else {
-      float xyz[3] = {vtx.x / 4096.f, vtx.y / 4096.f, vtx.z / 4096.f};
-      memcpy(buffer_ptr, xyz, 3 * sizeof(float));
+      math::Vector3f xyz = {vtx.x / 4096.f, vtx.y / 4096.f, vtx.z / 4096.f};
+      // track min/max for accessor
+      for (int i = 0; i < 3; i++) {
+        min[i] = std::min(min[i], xyz[i]);
+        max[i] = std::max(max[i], xyz[i]);
+      }
+      memcpy(buffer_ptr, xyz.data(), 3 * sizeof(float));
       buffer_ptr += 3 * sizeof(float);
     }
   }
@@ -222,6 +239,8 @@ int make_position_buffer_accessor(const std::vector<T>& vertices, tinygltf::Mode
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
   accessor.count = vertices.size();
   accessor.type = TINYGLTF_TYPE_VEC3;
+  accessor.minValues = {min[0], min[1], min[2]};
+  accessor.maxValues = {max[0], max[1], max[2]};
 
   return accessor_idx;
 }
@@ -1500,11 +1519,28 @@ int make_vec3_float_accessor(const std::vector<float>& data, tinygltf::Model& mo
   buffer.data.resize(data.size() * sizeof(float));
   memcpy(buffer.data.data(), data.data(), buffer.data.size());
 
+  // track min/max for accessor
+  math::Vector3f min = {std::numeric_limits<float>::max(), 
+                        std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max()};
+  math::Vector3f max = {std::numeric_limits<float>::lowest(), 
+                        std::numeric_limits<float>::lowest(),
+                        std::numeric_limits<float>::lowest()};
+  for (size_t i = 0; i < data.size(); i += 3) {
+    math::Vector3f xyz = {data[i], data[i + 1], data[i + 2]};
+    // track min/max for accessor
+    for (int axis = 0; axis < 3; axis++) {
+      min[axis] = std::min(min[axis], xyz[axis]);
+      max[axis] = std::max(max[axis], xyz[axis]);
+    }
+  }
+
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& bv = model.bufferViews.emplace_back();
   bv.buffer = buffer_idx;
   bv.byteOffset = 0;
   bv.byteLength = buffer.data.size();
+  bv.target = TINYGLTF_TARGET_ARRAY_BUFFER;
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
@@ -1513,6 +1549,8 @@ int make_vec3_float_accessor(const std::vector<float>& data, tinygltf::Model& mo
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
   accessor.count = data.size() / 3;
   accessor.type = TINYGLTF_TYPE_VEC3;
+  accessor.minValues = {min[0], min[1], min[2]};
+  accessor.maxValues = {max[0], max[1], max[2]};
   return accessor_idx;
 }
 
