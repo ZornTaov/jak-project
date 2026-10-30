@@ -1664,25 +1664,23 @@ void add_merc(const tfrag3::Level& level,
       // bind pose is bind_T_w
       // for glb we want bind_parent_T_bind_child
       // so bindp_T_w * inverse(bindc_T_w)
-      math::Matrix4f matrix;
+      // if no parent, then just identity, which is default for a node, so skip it
+      math::Transform matrix = math::Matrix4f::identity();
       if (gbone.parent_idx >= 0) {
         matrix = unscale_translation(game_bones.at(gbone.parent_idx).bind_pose_T_w) *
                  inverse(unscale_translation(gbone.bind_pose_T_w));
-
-      } else {
-        // I think this value is ignored anyway.
-        for (int r = 0; r < 4; r++) {
-          for (int c = 0; c < 4; c++) {
-            matrix(r, c) = (r == c) ? 1 : 0;
-          }
-        }
       }
-
-      for (int r = 0; r < 4; r++) {
-        for (int c = 0; c < 4; c++) {
-          snode.matrix.push_back(matrix(c, r));
-        }
-      }
+      
+      // decompose the matrix into translation, rotation, scale
+      // this could be done with a utility function to clean up all the 
+      // float -> double conversions, but for now this is fine
+      auto translation = matrix.translation();
+      snode.translation = {translation.x(), translation.y(), translation.z()};
+      auto rotation = matrix.rotation();
+      snode.rotation = {rotation.x(), rotation.y(), rotation.z(), rotation.w()};
+      auto scale = matrix.scale();
+      snode.scale = {scale.x(), scale.y(), scale.z()};
+      
       for (auto child : children.at(i)) {
         snode.children.push_back(skin.skeleton + child);
       }

@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "common/util/Assert.h"
+
 #include "fmt/format.h"
 
 namespace math {
@@ -88,6 +90,17 @@ class Vector {
   bool operator==(const T other) const {
     for (int i = 0; i < Size; i++) {
       if (m_data[i] != other) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool approx_equal(const Vector<T, Size>& other, T epsilon = 0.0001) const
+    requires std::is_floating_point<T>::value {
+    for (int i = 0; i < Size; i++) {
+      T scale = std::max({T(1), std::abs(m_data[i]), std::abs(other.m_data[i])});
+      if (std::abs(m_data[i] - other.m_data[i]) > epsilon * scale) {
         return false;
       }
     }
@@ -308,6 +321,24 @@ class Vector {
 
   void set_zero() { fill(0); }
 
+  T sum() const {
+    T result = m_data[0];
+    for (int i = 1; i < Size; i++) {
+      result += m_data[i];
+    }
+    return result;
+  }
+
+  T product() const {
+    T result = m_data[0];
+    for (int i = 1; i < Size; i++) {
+      result *= m_data[i];
+    }
+    return result;
+  }
+
+  T average() const { return sum() / T(Size); }
+
  private:
   T m_data[Size];
 };
@@ -343,6 +374,29 @@ struct Matrix {
 
   T& operator()(int r, int c) { return m_data[r + c * Rows]; }
   const T& operator()(int r, int c) const { return m_data[r + c * Rows]; }
+
+  // compare two matrices for equality
+  bool operator==(const Matrix<T, Rows, Cols>& other) const {
+    for (int i = 0; i < Rows * Cols; i++) {
+      if (m_data[i] != other.m_data[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool operator!=(const Matrix<T, Rows, Cols>& other) const { return !(*this == other); }
+
+  bool approx_equal(const Matrix<T, Rows, Cols>& other, T epsilon = 0.0001) const
+    requires std::is_floating_point<T>::value {
+    for (int i = 0; i < Rows * Cols; i++) {
+      T scale = std::max({T(1), std::abs(m_data[i]), std::abs(other.m_data[i])});
+      if (std::abs(m_data[i] - other.m_data[i]) > epsilon * scale) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   Vector<T, Rows> col(int c) const {
     Vector<T, Rows> result;
@@ -418,6 +472,15 @@ using Vector3 = Vector<T, 3>;
 template <typename T>
 using Vector4 = Vector<T, 4>;
 
+template <typename T>
+struct Quaternion : Vector4<T> {
+  using Vector4<T>::Vector4;
+  Quaternion() = default;
+  Quaternion(const Vector4<T>& v) : Vector4<T>(v) {}
+  static Quaternion<T> identity() { return Quaternion<T>(0, 0, 0, 1); }
+};
+
+
 using Vector2f = Vector2<float>;
 using Vector3f = Vector3<float>;
 using Vector4f = Vector4<float>;
@@ -426,4 +489,80 @@ using Vector3d = Vector3<double>;
 using Vector4d = Vector4<double>;
 
 using Matrix4f = Matrix<float, 4, 4>;
+
+using Quaternionf = Quaternion<float>;
+using Quaterniond = Quaternion<double>;
+
+struct Transform : Matrix4f {
+  Transform() = default;
+  Transform(const Matrix4f& m) : Matrix4f(m) {}
+
+  Vector3f translation() const { return col(3).head<3>(); }
+  void set_translation(const Vector3f& t) {
+    for (int i = 0; i < 3; i++) {
+      operator()(i, 3) = t[i];
+    }
+  }
+  Vector3f scale() const {
+    Vector3f result;
+    for (int i = 0; i < 3; i++) {
+      result[i] = col(i).head<3>().length();
+    }
+    // if the determinant is negative (col0 · (col1 × col2) < 0 ), 
+    // then we have a reflection, so flip the sign of the first axis
+    if (col(0).head<3>().dot(col(1).head<3>().cross(col(2).head<3>())) < 0) {
+      result[0] = -result[0];
+    }
+    return result;
+  }
+  void set_scale(const Vector3f& s) {
+    for (int i = 0; i < 3; i++) {
+      ASSERT(this->col(i).head<3>().squared_length() > 0);
+      auto axis = this->col(i).head<3>().normalized();
+      for (int j = 0; j < 3; j++) {
+        operator()(j, i) = axis[j] * s[i];
+      }
+    }
+  }
+
+  // returns the rotation as a quaternion, without scale, using Shepard's method
+  Quaternionf rotation() const {
+    auto sc = scale();
+    auto m = [&](int r, int c) { return operator()(r, c) / sc[c]; };
+    auto trace = m(0, 0) + m(1, 1) + m(2, 2);
+    Quaternionf result;
+    if (trace > 0) {
+      auto s = std::sqrt(trace + 1.0f) * 2;
+      result.w() = 0.25f * s;
+      result.x() = (m(2, 1) - m(1, 2)) / s;
+      result.y() = (m(0, 2) - m(2, 0)) / s;
+      result.z() = (m(1, 0) - m(0, 1)) / s;
+    }
+    else {
+      if (m(0, 0) > m(1, 1) && m(0, 0) > m(2, 2)) {
+        auto s = std::sqrt(1.0f + m(0, 0) - m(1, 1) - m(2, 2)) * 2;
+        result.w() = (m(2, 1) - m(1, 2)) / s;
+        result.x() = 0.25f * s;
+        result.y() = (m(0, 1) + m(1, 0)) / s;
+        result.z() = (m(0, 2) + m(2, 0)) / s;
+      }
+      else if (m(1, 1) > m(2, 2)) {
+        auto s = std::sqrt(1.0f + m(1, 1) - m(0, 0) - m(2, 2)) * 2;
+        result.w() = (m(0, 2) - m(2, 0)) / s;
+        result.x() = (m(0, 1) + m(1, 0)) / s;
+        result.y() = 0.25f * s;
+        result.z() = (m(1, 2) + m(2, 1)) / s;
+      }
+      else {
+        auto s = std::sqrt(1.0f + m(2, 2) - m(0, 0) - m(1, 1)) * 2;
+        result.w() = (m(1, 0) - m(0, 1)) / s;
+        result.x() = (m(0, 2) + m(2, 0)) / s;
+        result.y() = (m(1, 2) + m(2, 1)) / s;
+        result.z() = 0.25f * s;
+      }
+    }
+    result.normalize();
+    return result;
+  }
+};
 }  // namespace math
