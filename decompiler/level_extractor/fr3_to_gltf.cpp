@@ -524,15 +524,7 @@ int make_shrub_index_buffer_view(const std::vector<u32>& indices,
   return buffer_view_idx;
 }
 
-int make_merc_index_buffer_view(const std::vector<u32>& indices,
-                                const tfrag3::MercModel& mmodel,
-                                const std::vector<tfrag3::MercVertex>& vertices,
-                                tinygltf::Model& model,
-                                std::vector<std::vector<u32>>& draw_to_start,
-                                std::vector<std::vector<u32>>& draw_to_count) {
-  std::vector<u32> unstripped;
-  unstrip_merc_draws(indices, mmodel, vertices, unstripped, draw_to_start, draw_to_count);
-
+int make_merc_index_buffer_view(const std::vector<u32>& unstripped, tinygltf::Model& model) {
   // first create a buffer:
   int buffer_idx = (int)model.buffers.size();
   auto& buffer = model.buffers.emplace_back();
@@ -1523,10 +1515,11 @@ int make_vec3_float_accessor(const std::vector<float>& data, tinygltf::Model& mo
   return accessor_idx;
 }
 
-void add_blerc_targets(const tfrag3::Level& level,
-                       const tfrag3::MercModel& mmodel,
+void add_blerc_targets(const tfrag3::MercModel& mmodel,
                        tinygltf::Mesh& mesh,
-                       tinygltf::Model& model) {
+                       tinygltf::Model& model,
+                       const std::vector<u32>& used_idx,
+                       const u32 num_vtx) {
   // find max target index across all effects to know how many morph targets we need
   u32 num_targets = 0;
   for (const auto& effect : mmodel.effects) {
@@ -1551,7 +1544,6 @@ void add_blerc_targets(const tfrag3::Level& level,
     return;
   }
 
-  const auto num_vtx = (u32)level.merc_data.vertices.size();
   std::vector pos_deltas(num_targets, std::vector(num_vtx * 3, 0.f));
   std::vector nrm_deltas(num_targets, std::vector(num_vtx * 3, 0.f));
 
@@ -1582,18 +1574,22 @@ void add_blerc_targets(const tfrag3::Level& level,
         continue;
       }
       u32 global_idx = effect.mod.mod_to_global_vertex_idx[dest];
+      u32 local_idx = used_idx[global_idx];
+      if (local_idx >= num_vtx) {
+        continue;
+      }
 
       for (const auto& te : vertex_targets) {
         if (te.tgt_idx >= num_targets || te.float_offset >= blerc.float_data.size()) {
           continue;
         }
         const auto& fd = blerc.float_data[te.float_offset];
-        pos_deltas[te.tgt_idx][global_idx * 3 + 0] = fd.v[0] * (8192.f / 4096.f);
-        pos_deltas[te.tgt_idx][global_idx * 3 + 1] = fd.v[1] * (8192.f / 4096.f);
-        pos_deltas[te.tgt_idx][global_idx * 3 + 2] = fd.v[2] * (8192.f / 4096.f);
-        nrm_deltas[te.tgt_idx][global_idx * 3 + 0] = fd.v[4] * 8192.f;
-        nrm_deltas[te.tgt_idx][global_idx * 3 + 1] = fd.v[5] * 8192.f;
-        nrm_deltas[te.tgt_idx][global_idx * 3 + 2] = fd.v[6] * 8192.f;
+        pos_deltas[te.tgt_idx][local_idx * 3 + 0] = fd.v[0] * (8192.f / 4096.f);
+        pos_deltas[te.tgt_idx][local_idx * 3 + 1] = fd.v[1] * (8192.f / 4096.f);
+        pos_deltas[te.tgt_idx][local_idx * 3 + 2] = fd.v[2] * (8192.f / 4096.f);
+        nrm_deltas[te.tgt_idx][local_idx * 3 + 0] = fd.v[4] * 8192.f;
+        nrm_deltas[te.tgt_idx][local_idx * 3 + 1] = fd.v[5] * 8192.f;
+        nrm_deltas[te.tgt_idx][local_idx * 3 + 2] = fd.v[6] * 8192.f;
       }
     }
   }
@@ -1620,18 +1616,44 @@ void add_merc(const tfrag3::Level& level,
               const std::unordered_map<int, int>& anim_slot_to_base_tex) {
   const auto& mverts = level.merc_data.vertices;
 
-  // create position and uv buffers
-  int position_buffer_accessor = make_position_buffer_accessor(mverts, model);
-  int texture_buffer_accessor = make_tex_buffer_accessor(mverts, model, 1.f);
-
+  // unstrip the merc model and build a global to local and local to global vertex lists
+  // this is needed because mverts has all vertices for the level, but the merc
+  // model only uses a subset of them, and the merc model is stripped
   std::vector<std::vector<u32>> draw_to_start, draw_to_count;
-  int index_buffer_view = make_merc_index_buffer_view(level.merc_data.indices, mmodel, mverts,
-                                                      model, draw_to_start, draw_to_count);
-  int colors = make_color_buffer_accessor(mverts, model);
+  std::vector<u32> unstripped_global_idx;
+  unstrip_merc_draws(level.merc_data.indices, mmodel, mverts, unstripped_global_idx, draw_to_start,
+                     draw_to_count);
 
-  auto joints_accessor = make_bones_accessor(mverts, model);
-  auto weights_accessor = make_weights_accessor(mverts, model);
-  auto normal_buffer_accessor = make_normal_buffer_accessor(mverts, model);
+  std::vector<u32> unstripped_local_idx;
+  std::vector<u32> global_to_local_idx(mverts.size(), -1);
+  std::vector<u32> local_to_global_idx;
+
+  // for each unstripped global index, assign a local index if it hasn't been assigned yet
+  for (u32 i = 0; i < unstripped_global_idx.size(); i++) {
+    if (global_to_local_idx[unstripped_global_idx[i]] == -1) {
+      global_to_local_idx[unstripped_global_idx[i]] = (u32)local_to_global_idx.size();
+      local_to_global_idx.push_back(unstripped_global_idx[i]);
+    }
+    unstripped_local_idx.push_back(global_to_local_idx[unstripped_global_idx[i]]);
+  }
+
+  // build a local vertex list for this merc from the global vertex list using
+  // the local to global index mapping
+  std::vector<tfrag3::MercVertex> local_verts(local_to_global_idx.size());
+  for (const auto& idx : local_to_global_idx) {
+    local_verts[global_to_local_idx[idx]] = mverts[idx];
+  }
+
+  // create position and uv buffers
+  int position_buffer_accessor = make_position_buffer_accessor(local_verts, model);
+  int texture_buffer_accessor = make_tex_buffer_accessor(local_verts, model, 1.f);
+
+  int index_buffer_view = make_merc_index_buffer_view(unstripped_local_idx, model);
+  int colors = make_color_buffer_accessor(local_verts, model);
+
+  auto joints_accessor = make_bones_accessor(local_verts, model);
+  auto weights_accessor = make_weights_accessor(local_verts, model);
+  auto normal_buffer_accessor = make_normal_buffer_accessor(local_verts, model);
 
   const auto& art = art_data.find(mmodel.name);
   int node_idx = (int)model.nodes.size();
@@ -1760,7 +1782,7 @@ void add_merc(const tfrag3::Level& level,
     }
   }
 
-  add_blerc_targets(level, mmodel, mesh, model);
+  add_blerc_targets(mmodel, mesh, model, global_to_local_idx, (u32)local_to_global_idx.size());
 }
 
 void consolidate_buffers(tinygltf::Model& model) {
