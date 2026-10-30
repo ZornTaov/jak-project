@@ -1131,18 +1131,19 @@ int make_bones_accessor(const std::vector<tfrag3::MercVertex>& vertices, tinyglt
   // first create a buffer:
   int buffer_idx = (int)model.buffers.size();
   auto& buffer = model.buffers.emplace_back();
-  buffer.data.resize(4 * vertices.size());
+  using JointIdx = u8[4];
+  buffer.data.resize(sizeof(JointIdx) * vertices.size());
 
   // and fill it
   u8* buffer_ptr = buffer.data.data();
   for (const auto& vtx : vertices) {
-    u8 indices[4];
+    JointIdx indices{};
     for (int i = 0; i < 3; i++) {
-      indices[i] = vtx.mats[i] ? vtx.mats[i] - 1 : 0;
+      indices[i] = (u8)((vtx.mats[i] && vtx.weights[i] > 0.f) ? vtx.mats[i] - 1 : 0);
     }
     indices[3] = 0;
-    memcpy(buffer_ptr, indices, 4);
-    buffer_ptr += 4;
+    memcpy(buffer_ptr, indices, sizeof(JointIdx));
+    buffer_ptr += sizeof(JointIdx);
   }
 
   // create a view of this buffer
