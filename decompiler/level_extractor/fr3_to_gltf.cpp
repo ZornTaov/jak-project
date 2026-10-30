@@ -1677,10 +1677,10 @@ void add_merc(const tfrag3::Level& level,
         children.at(game_bones[i].parent_idx).push_back(i);
       }
     }
-    skin.skeleton = model.nodes.size();
+    int first_joint = (int)model.nodes.size();
     for (int i = 0; i < n_bones; i++) {
       const auto& gbone = game_bones[i];
-      skin.joints.push_back(skin.skeleton + i);
+      skin.joints.push_back(first_joint + i);
       auto& snode = model.nodes.emplace_back();
       snode.name = gbone.name;
 
@@ -1705,15 +1705,15 @@ void add_merc(const tfrag3::Level& level,
       snode.scale = {scale.x(), scale.y(), scale.z()};
       
       for (auto child : children.at(i)) {
-        snode.children.push_back(skin.skeleton + child);
+        snode.children.push_back(first_joint + child);
       }
     }
-    ASSERT(skin.skeleton + n_bones == (int)model.nodes.size());
+    ASSERT(first_joint + n_bones == (int)model.nodes.size());
     skin.inverseBindMatrices = make_inv_matrix_bind_poses(game_bones, model);
 
     for (int i = 0; i < n_bones; i++) {
       if (game_bones[i].parent_idx < 0) {
-        model.scenes.at(0).nodes.push_back(skin.skeleton + i);
+        model.scenes.at(0).nodes.push_back(first_joint + i);
       }
     }
   }
