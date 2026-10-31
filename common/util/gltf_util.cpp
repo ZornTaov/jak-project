@@ -591,39 +591,6 @@ int texture_pool_add_envmap_control_texture(TexturePool* pool,
   return idx;
 }
 
-math::Matrix4f affine_translation(const math::Vector3f& translation) {
-  math::Matrix4f result = math::Matrix4f::identity();
-  result(0, 3) = translation[0];
-  result(1, 3) = translation[1];
-  result(2, 3) = translation[2];
-  result(3, 3) = 1;
-  return result;
-}
-
-math::Matrix4f affine_scale(const math::Vector3f& scale) {
-  math::Matrix4f result = math::Matrix4f::zero();
-  result(0, 0) = scale[0];
-  result(1, 1) = scale[1];
-  result(2, 2) = scale[2];
-  result(3, 3) = 1;
-  return result;
-}
-
-math::Matrix4f affine_rot_qxyzw(const math::Vector4f& quat) {
-  math::Matrix4f result = math::Matrix4f::zero();
-  result(3, 3) = 1;
-  result(0, 0) = 1.0 - 2.0 * (quat.y() * quat.y() + quat.z() * quat.z());
-  result(0, 1) = 2.0 * (quat.x() * quat.y() - quat.z() * quat.w());
-  result(0, 2) = 2.0 * (quat.x() * quat.z() + quat.y() * quat.w());
-  result(1, 0) = 2.0 * (quat.x() * quat.y() + quat.z() * quat.w());
-  result(1, 1) = 1.0 - 2.0 * (quat.x() * quat.x() + quat.z() * quat.z());
-  result(1, 2) = 2.0 * (quat.y() * quat.z() - quat.x() * quat.w());
-  result(2, 0) = 2.0 * (quat.x() * quat.z() - quat.y() * quat.w());
-  result(2, 1) = 2.0 * (quat.y() * quat.z() + quat.x() * quat.w());
-  result(2, 2) = 1.0 - 2.0 * (quat.x() * quat.x() + quat.y() * quat.y());
-  return result;
-}
-
 math::Vector3f vector3f_from_gltf(const std::vector<double>& in) {
   ASSERT(in.size() == 3);
   return math::Vector3f{in[0], in[1], in[2]};
@@ -637,10 +604,7 @@ math::Vector4f vector4f_from_gltf(const std::vector<double>& in) {
 math::Matrix4f matrix_from_trs(const math::Vector3f& trans,
                                const math::Vector4f& quat,
                                const math::Vector3f& scale) {
-  math::Matrix4f t = affine_translation(trans);
-  math::Matrix4f r = affine_rot_qxyzw(quat);
-  math::Matrix4f s = affine_scale(scale);
-  return t * r * s;
+  return math::Transform::from_trs(trans, quat, scale);
 }
 
 math::Matrix4f matrix_from_node(const tinygltf::Node& node) {
@@ -652,26 +616,21 @@ math::Matrix4f matrix_from_node(const tinygltf::Node& node) {
     return result;
   } else {
     // from trs
-    math::Matrix4f t, r, s;
+    math::Vector3f t = math::Vector3f::zero(), s = math::Vector3f::one();
+    math::Quaternionf r = math::Quaternionf::identity();
     if (!node.translation.empty()) {
-      t = affine_translation(vector3f_from_gltf(node.translation));
-    } else {
-      t = math::Matrix4f::identity();
+      t = vector3f_from_gltf(node.translation);
     }
 
     if (!node.rotation.empty()) {
-      r = affine_rot_qxyzw(vector4f_from_gltf(node.rotation));
-    } else {
-      r = math::Matrix4f::identity();
+      r = vector4f_from_gltf(node.rotation);
     }
 
     if (!node.scale.empty()) {
-      s = affine_scale(vector3f_from_gltf(node.scale));
-    } else {
-      s = math::Matrix4f::identity();
+      s = vector3f_from_gltf(node.scale);
     }
 
-    return t * r * s;
+    return math::Transform::from_trs(t, r, s);
   }
 }
 

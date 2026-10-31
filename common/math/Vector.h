@@ -20,6 +20,14 @@ class Vector {
     return result;
   }
 
+  static Vector<T, Size> one() {
+    Vector<T, Size> result;
+    for (auto& x : result.m_data) {
+      x = T(1);
+    }
+    return result;
+  }
+
   static Vector<T, Size> unit(int idx) {
     Vector<T, Size> result = Vector<T, Size>::zero();
     result[idx] = T(1);
@@ -97,7 +105,8 @@ class Vector {
   }
 
   bool approx_equal(const Vector<T, Size>& other, T epsilon = 0.0001) const
-    requires std::is_floating_point<T>::value {
+    requires std::is_floating_point<T>::value
+  {
     for (int i = 0; i < Size; i++) {
       T scale = std::max({T(1), std::abs(m_data[i]), std::abs(other.m_data[i])});
       if (std::abs(m_data[i] - other.m_data[i]) > epsilon * scale) {
@@ -388,7 +397,8 @@ struct Matrix {
   bool operator!=(const Matrix<T, Rows, Cols>& other) const { return !(*this == other); }
 
   bool approx_equal(const Matrix<T, Rows, Cols>& other, T epsilon = 0.0001) const
-    requires std::is_floating_point<T>::value {
+    requires std::is_floating_point<T>::value
+  {
     for (int i = 0; i < Rows * Cols; i++) {
       T scale = std::max({T(1), std::abs(m_data[i]), std::abs(other.m_data[i])});
       if (std::abs(m_data[i] - other.m_data[i]) > epsilon * scale) {
@@ -404,6 +414,11 @@ struct Matrix {
       result[i] = m_data[c * Rows + i];
     }
     return result;
+  }
+  void set_col(int c, const Vector<T, Rows>& v) {
+    for (int r = 0; r < Rows; r++) {
+      operator()(r, c) = v[r];
+    }
   }
 
   T* data() { return m_data; }
@@ -480,7 +495,6 @@ struct Quaternion : Vector4<T> {
   static Quaternion<T> identity() { return Quaternion<T>(0, 0, 0, 1); }
 };
 
-
 using Vector2f = Vector2<float>;
 using Vector3f = Vector3<float>;
 using Vector4f = Vector4<float>;
@@ -497,18 +511,26 @@ struct Transform : Matrix4f {
   Transform() = default;
   Transform(const Matrix4f& m) : Matrix4f(m) {}
 
-  Vector3f translation() const { return col(3).head<3>(); }
-  void set_translation(const Vector3f& t) {
-    for (int i = 0; i < 3; i++) {
-      operator()(i, 3) = t[i];
-    }
+  static Transform zero() { return Transform(Matrix4f::zero()); }
+  static Transform identity() { return Transform(Matrix4f::identity()); }
+
+  static Transform from_trs(const Vector3f& t, const Quaternionf& q, const Vector3f& s) {
+    Transform result = Transform::identity();
+    result.set_rotation(q);
+    result.set_scale(s);
+    result.set_translation(t);
+    return result;
   }
+
+  Vector3f translation() const { return col(3).head<3>(); }
+  void set_translation(const Vector3f& t) { set_col(3, Vector4f(t.x(), t.y(), t.z(), 1)); }
+
   Vector3f scale() const {
     Vector3f result;
     for (int i = 0; i < 3; i++) {
       result[i] = col(i).head<3>().length();
     }
-    // if the determinant is negative (col0 · (col1 × col2) < 0 ), 
+    // if the determinant is negative (col0 · (col1 × col2) < 0 ),
     // then we have a reflection, so flip the sign of the first axis
     if (col(0).head<3>().dot(col(1).head<3>().cross(col(2).head<3>())) < 0) {
       result[0] = -result[0];
@@ -516,9 +538,10 @@ struct Transform : Matrix4f {
     return result;
   }
   void set_scale(const Vector3f& s) {
+    auto cur = scale();
     for (int i = 0; i < 3; i++) {
-      ASSERT(this->col(i).head<3>().squared_length() > 0);
-      auto axis = this->col(i).head<3>().normalized();
+      ASSERT(cur[i] != 0);
+      auto axis = this->col(i).head<3>() / cur[i];
       for (int j = 0; j < 3; j++) {
         operator()(j, i) = axis[j] * s[i];
       }
@@ -537,23 +560,20 @@ struct Transform : Matrix4f {
       result.x() = (m(2, 1) - m(1, 2)) / s;
       result.y() = (m(0, 2) - m(2, 0)) / s;
       result.z() = (m(1, 0) - m(0, 1)) / s;
-    }
-    else {
+    } else {
       if (m(0, 0) > m(1, 1) && m(0, 0) > m(2, 2)) {
         auto s = std::sqrt(1.0f + m(0, 0) - m(1, 1) - m(2, 2)) * 2;
         result.w() = (m(2, 1) - m(1, 2)) / s;
         result.x() = 0.25f * s;
         result.y() = (m(0, 1) + m(1, 0)) / s;
         result.z() = (m(0, 2) + m(2, 0)) / s;
-      }
-      else if (m(1, 1) > m(2, 2)) {
+      } else if (m(1, 1) > m(2, 2)) {
         auto s = std::sqrt(1.0f + m(1, 1) - m(0, 0) - m(2, 2)) * 2;
         result.w() = (m(0, 2) - m(2, 0)) / s;
         result.x() = (m(0, 1) + m(1, 0)) / s;
         result.y() = 0.25f * s;
         result.z() = (m(1, 2) + m(2, 1)) / s;
-      }
-      else {
+      } else {
         auto s = std::sqrt(1.0f + m(2, 2) - m(0, 0) - m(1, 1)) * 2;
         result.w() = (m(1, 0) - m(0, 1)) / s;
         result.x() = (m(0, 2) + m(2, 0)) / s;
@@ -563,6 +583,17 @@ struct Transform : Matrix4f {
     }
     result.normalize();
     return result;
+  }
+
+  void set_rotation(const Quaternionf& q) {
+    auto qn = q.normalized();
+    auto sc = scale();
+    auto xx = qn.x() * qn.x(), yy = qn.y() * qn.y(), zz = qn.z() * qn.z();
+    auto xy = qn.x() * qn.y(), xz = qn.x() * qn.z(), yz = qn.y() * qn.z();
+    auto wx = qn.w() * qn.x(), wy = qn.w() * qn.y(), wz = qn.w() * qn.z();
+    set_col(0, Vector4f(1.0f - 2.0f * (yy + zz), 2.0f * (xy + wz), 2.0f * (xz - wy), 0.0f) * sc[0]);
+    set_col(1, Vector4f(2.0f * (xy - wz), 1.0f - 2.0f * (xx + zz), 2.0f * (yz + wx), 0.0f) * sc[1]);
+    set_col(2, Vector4f(2.0f * (xz + wy), 2.0f * (yz - wx), 1.0f - 2.0f * (xx + yy), 0.0f) * sc[2]);
   }
 };
 }  // namespace math
