@@ -35,6 +35,7 @@ struct JointsAndWeights {
   math::Vector<float, 3> weights = math::Vector<float, 3>::zero();
 };
 
+int extras_int(const tinygltf::Value& extras, const std::string& key, int fallback);
 std::vector<math::Vector3f> extract_vec3f(const u8* data, u32 count, u32 stride);
 std::vector<math::Vector2f> extract_vec2f(const u8* data, u32 count, u32 stride);
 std::vector<math::Vector<u8, 4>> extract_color_from_vec4_u16(const u8* data, u32 count, u32 stride);

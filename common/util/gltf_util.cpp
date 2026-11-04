@@ -7,6 +7,13 @@
 
 namespace gltf_util {
 
+int extras_int(const tinygltf::Value& extras, const std::string& key, int fallback) {
+  if (!extras.Has(key) || !extras.Get(key).IsNumber()) {
+    return fallback;
+  }
+  return extras.Get(key).GetNumberAsInt();
+}
+
 /*!
  * Convert a GLTF position buffer or similar to std::vector<Vec3f>
  */
@@ -751,15 +758,24 @@ bool material_has_envmap(const tinygltf::Material& mat) {
 }
 
 bool envmap_is_valid(const tinygltf::Material& mat) {
-  auto envmap = material_has_envmap(mat);
-  if (envmap && mat.pbrMetallicRoughness.metallicRoughnessTexture.index < 0) {
+  if (!material_has_envmap(mat)) {
+    return false;
+  }
+  if (mat.pbrMetallicRoughness.metallicRoughnessTexture.index < 0) {
     lg::warn(fmt::format(
         "Material \"{}\" has specular property set, but is missing a metallic roughness texture, "
         "ignoring envmap!",
         mat.name));
     return false;
   }
-  return envmap;
+  if (!mat.extensions.at("KHR_materials_specular").Has("specularColorTexture")) {
+    lg::warn(fmt::format(
+        "Material \"{}\" has specular property set, but is missing a specular color texture, "
+        "ignoring envmap!",
+        mat.name));
+    return false;
+  }
+  return true;
 }
 
 std::optional<int> find_single_skin(const tinygltf::Model& model,
@@ -830,7 +846,6 @@ void process_normal_merc_draw(const tinygltf::Model& model,
                               tfrag3::MercEffect& eff,
                               int mat_idx,
                               const tfrag3::MercDraw& d_) {
-  const auto& mat = model.materials[mat_idx];
   eff.all_draws.push_back(d_);
   auto& draw = eff.all_draws.back();
   draw.mode = gltf_util::make_default_draw_mode();
@@ -840,6 +855,7 @@ void process_normal_merc_draw(const tinygltf::Model& model,
     draw.tree_tex_id = 0;
     return;
   }
+  const auto& mat = model.materials[mat_idx];
   int tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index;
   if (tex_idx == -1) {
     lg::warn("Material {} has no texture, using default texture.", mat.name);
@@ -863,7 +879,6 @@ void process_envmap_merc_draw(const tinygltf::Model& model,
                               tfrag3::MercEffect& eff,
                               int mat_idx,
                               const tfrag3::MercDraw& d_) {
-  const auto& mat = model.materials[mat_idx];
   eff.all_draws.push_back(d_);
   auto& draw = eff.all_draws.back();
   draw.mode = gltf_util::make_default_draw_mode();
@@ -873,6 +888,7 @@ void process_envmap_merc_draw(const tinygltf::Model& model,
     draw.tree_tex_id = texture_pool_debug_checker(&out.tex_pool);
     return;
   }
+  const auto& mat = model.materials[mat_idx];
   int base_tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index;
   if (base_tex_idx == -1) {
     lg::warn("Envmap material {} has no texture, using default texture.", mat.name);

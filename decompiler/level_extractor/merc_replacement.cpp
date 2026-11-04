@@ -64,11 +64,17 @@ void extract(tfrag3::MercModel& mdl,
           gltf_util::JointsAndWeights dummy;
           dummy.joints[0] = 3;
           dummy.weights[0] = 1.f;
-          for (size_t i = 0; i < out.new_vertices.size(); i++) {
+          for (size_t i = 0; i < verts.vtx.size(); i++) {
             out.joints_and_weights.push_back(dummy);
           }
         }
-
+        ASSERT_MSG(prim.material != -1,
+                   fmt::format("{}:Primitive in mesh '{}' has no material", mdl.name, mesh.name));
+        ASSERT_MSG(
+            draw_by_material.contains(prim.material) == false,
+            fmt::format("{}: material '{}' is used again by mesh '{}'. "
+                        "Join the objects that share it (Ctrl+J) or give each its own material.",
+                        mdl.name, model.materials[prim.material].name, mesh.name));
         // TODO: just putting it all in one material
         auto& draw = draw_by_material[prim.material];
         draw.mode = gltf_util::make_default_draw_mode();  // todo rm
@@ -83,33 +89,93 @@ void extract(tfrag3::MercModel& mdl,
     }
   }
 
-  tfrag3::MercEffect e;
-  tfrag3::MercEffect envmap_eff;
-  envmap_eff.has_envmap = false;
+  // (og_effect_idx, og_draw_idx) -> mat_idx
+  std::map<std::pair<int, int>, int> mat_by_effect_draw;
+  std::vector<int> unplaced;
   out.new_model.name = mdl.name;
   // if we have a skeleton, use that joint count, otherwise use a high default value since the model
   // we replace can have more
   out.new_model.max_bones = joints != 3 ? joints : 100;
   out.new_model.max_draws = 0;
 
+  // Phase 1: Build a map of effect/draw indices to material indices,
+  //          and warn about any materials that don't have them
   for (const auto& [mat_idx, d_] : draw_by_material) {
     const auto& mat = model.materials[mat_idx];
-    if (mat_idx < 0 || !gltf_util::material_has_envmap(model.materials[mat_idx]) ||
-        !gltf_util::envmap_is_valid(model.materials[mat_idx])) {
-      gltf_util::process_normal_merc_draw(model, out, tex_offset, e, mat_idx, d_);
+    auto effect_idx = extras_int(mat.extras, "og_effect_idx", -1);
+    auto draw_idx = extras_int(mat.extras, "og_draw_idx", -1);
+    if (effect_idx != -1 && draw_idx != -1 && effect_idx < (int)mdl.effects.size()) {
+      ASSERT_MSG(mat_by_effect_draw.contains({effect_idx, draw_idx}) == false,
+                 fmt::format("{}: material '{}' has duplicate effect/draw indices ({}, {})",
+                             mdl.name, mat.name, effect_idx, draw_idx));
+      mat_by_effect_draw[{effect_idx, draw_idx}] = mat_idx;
     } else {
-      envmap_eff.has_envmap = true;
-      gltf_util::process_envmap_merc_draw(model, out, tex_offset, envmap_eff, mat_idx, d_);
+      if (effect_idx == -1 && draw_idx == -1) {
+        lg::warn("{}: material '{}' has no effect/draw indices", mdl.name, mat.name);
+      } else if (effect_idx < 0 || effect_idx >= (int)mdl.effects.size()) {
+        lg::warn("{}: material '{}' Effect index is invalid: {} of {}", mdl.name, mat.name,
+                 effect_idx, mdl.effects.size());
+      } else {
+        lg::warn("{}: material '{}' Draw index is invalid: {}", mdl.name, mat.name, draw_idx);
+      }
+      unplaced.push_back(mat_idx);
     }
   }
+  ASSERT_MSG(!mdl.effects.empty(),
+             fmt::format("{}: model has no effects, cannot place materials", mdl.name));
+  // Size the effects vector to the number of effects in the original model, so we can index into it
+  out.new_model.effects.resize(mdl.effects.size());
 
-  // in case a model only has envmap draws, we don't push the normal merc effect
-  if (!e.all_draws.empty()) {
-    out.new_model.effects.push_back(e);
+  // Add the draw for mat_idx to effect effect_idx. The envmap path is only used when both the
+  // material and the effect are envmap, so an effect never mixes the two kinds of draw.
+  auto place_draw = [&](int effect_idx, int mat_idx, bool is_envmap) {
+    const auto& mat = model.materials[mat_idx];
+    const auto& d_ = draw_by_material.at(mat_idx);
+    auto& e = out.new_model.effects[effect_idx];
+    if (e.all_draws.empty()) {
+      e.has_envmap = is_envmap;
+    }
+    if (is_envmap != e.has_envmap) {
+      lg::warn("{}: material '{}' {} envmap but effect {} {}; {}", mdl.name, mat.name,
+               is_envmap ? "is" : "is not", effect_idx, e.has_envmap ? "is" : "is not",
+               is_envmap ? "drawing it without envmap" : "it will get the effect's envmap");
+    }
+    if (is_envmap && e.has_envmap) {
+      gltf_util::process_envmap_merc_draw(model, out, tex_offset, e, mat_idx, d_);
+    } else {
+      gltf_util::process_normal_merc_draw(model, out, tex_offset, e, mat_idx, d_);
+    }
+  };
+
+  // Phase 2: For each material that has effect/draw indices,
+  //          process it and add it to the appropriate effect
+  for (const auto& [eff_draw, mat_idx] : mat_by_effect_draw) {
+    place_draw(eff_draw.first, mat_idx, gltf_util::envmap_is_valid(model.materials[mat_idx]));
   }
-  if (envmap_eff.has_envmap) {
-    out.new_model.effects.push_back(envmap_eff);
+
+  // Phase 3: For any materials that didn't have effect/draw indices,
+  //          find an effect that matches its envmap status and add it there
+  for (auto mat_idx : unplaced) {
+    const auto& mat = model.materials[mat_idx];
+    bool is_envmap = gltf_util::envmap_is_valid(mat);
+    int target_effect = -1;
+    for (size_t i = 0; i < mdl.effects.size(); i++) {
+      if (mdl.effects[i].has_envmap == is_envmap) {
+        target_effect = (int)i;
+        lg::info("{}: placing material '{}' in effect {}", mdl.name, mat.name, target_effect);
+        break;
+      }
+    }
+    if (target_effect == -1) {
+      lg::warn("{}: no {} effect in the original model for material '{}', using effect 0", mdl.name,
+               is_envmap ? "envmap" : "normal", mat.name);
+      target_effect = 0;
+    }
+    place_draw(target_effect, mat_idx, is_envmap);
   }
+
+  ASSERT_MSG(!out.new_model.effects[0].all_draws.empty(),
+             fmt::format("{}: first effect has no draws, the replacement can't be used", mdl.name));
 
   // copy any effects from the old model that used mod or eye draws
   if (copy_eye_draws || copy_mod_draws) {
@@ -140,9 +206,16 @@ void extract(tfrag3::MercModel& mdl,
   for (auto& effect : out.new_model.effects) {
     out.new_model.max_draws += effect.all_draws.size();
   }
+  int count = [&]() {
+    int c = 0;
+    for (auto& effect : out.new_model.effects) {
+      c += effect.has_envmap ? effect.all_draws.size() : 0;
+    }
+    return c;
+  }();
 
   lg::info("total of {} unique materials ({} normal, {} envmap)", out.new_model.max_draws,
-           e.all_draws.size(), envmap_eff.all_draws.size());
+           out.new_model.max_draws - count, count);
   lg::info("Merged {} meshes and {} prims into {} vertices", mesh_count, prim_count,
            out.new_vertices.size());
 }
