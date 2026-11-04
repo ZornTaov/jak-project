@@ -493,7 +493,7 @@ int texture_pool_debug_checker(TexturePool* pool) {
   }
 }
 
-int texture_pool_add_texture(TexturePool* pool, const tinygltf::Image& tex, int alpha_shift) {
+int texture_pool_add_texture(TexturePool* pool, const tinygltf::Image& tex) {
   const auto& existing = pool->textures_by_name.find(tex.name);
   if (existing != pool->textures_by_name.end() && existing->second.size() > 0) {
     // name was found, see if we have a match on height+width+data
@@ -533,7 +533,7 @@ int texture_pool_add_texture(TexturePool* pool, const tinygltf::Image& tex, int 
   // adjust alpha colors for PS2/PC difference
   for (auto& color : tt.data) {
     u32 alpha = color >> 24;
-    alpha >>= alpha_shift;
+    alpha = (alpha + 1) >> 1;
     color &= 0xff'ff'ff;
     color |= (alpha << 24);
   }
@@ -589,7 +589,7 @@ int texture_pool_add_envmap_control_texture(TexturePool* pool,
   // adjust alpha from metallic channel
   for (size_t i = 0; i < tt.data.size(); i++) {
     u32 rgb = tt.data[i];
-    u32 metal = mr_src[4 * i + 2] / 4;
+    u32 metal = (u32)(mr_src[4 * i + 2] + 1) >> 1;
     rgb &= 0xff'ff'ff;
     rgb |= (metal << 24);
     tt.data[i] = rgb;

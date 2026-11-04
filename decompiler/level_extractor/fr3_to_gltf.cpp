@@ -639,6 +639,12 @@ int add_image_for_tex(const tfrag3::Level& level,
   image.mimeType = "image/png";
   image.name = tex.debug_name;
   memcpy(image.image.data(), tex.data.data(), tex.data.size() * 4);
+  if (kind == TexImageKind::RGBA) {
+    for (size_t i = 0; i < tex.data.size(); i++) {
+      const u8 alpha = (u8)std::min<u32>(255, (u32)image.image[i * 4 + 3] * 2);
+      image.image[i * 4 + 3] = alpha;
+    }
+  }
 
   if (kind == TexImageKind::ENVMAP_STRENGTH) {
     image.name = tex.debug_name + "-envmap-strength";
@@ -693,7 +699,7 @@ int add_material_for_tex(const tfrag3::Level& level,
   mat.name = tex.debug_name;
   mat.doubleSided = true;
   // the 2.0 here compensates for the ps2's weird blending where 0.5 behaves like 1.0
-  mat.pbrMetallicRoughness.baseColorFactor = {2.0, 2.0, 2.0, 2.0};
+  mat.pbrMetallicRoughness.baseColorFactor = {2.0, 2.0, 2.0, 1.0};
   mat.pbrMetallicRoughness.baseColorTexture.texCoord = 0;  // TEXCOORD_0, I think
   mat.pbrMetallicRoughness.baseColorTexture.index = add_gltf_texture(
       model, add_image_for_tex(level, model, tex_idx, tex_image_map, TexImageKind::RGBA),

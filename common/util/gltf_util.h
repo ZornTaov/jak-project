@@ -65,7 +65,7 @@ struct TexturePool {
   std::map<std::pair<int, int>, int> envmap_textures_by_gltf_id;
 };
 
-int texture_pool_add_texture(TexturePool* pool, const tinygltf::Image& tex, int alpha_shift = 1);
+int texture_pool_add_texture(TexturePool* pool, const tinygltf::Image& tex);
 int texture_pool_add_envmap_control_texture(TexturePool* pool,
                                             const tinygltf::Model& model,
                                             int rgb_image_id,
