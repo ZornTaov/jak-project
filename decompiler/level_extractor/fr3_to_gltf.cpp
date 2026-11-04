@@ -1808,9 +1808,23 @@ void add_merc(const tfrag3::Level& level,
         tex_id = it != anim_slot_to_base_tex.end() ? it->second : draw.tree_tex_id;
       }
       prim.material = add_material_for_tex(level, model, tex_id, tex_image_map, draw.mode, envmap);
-      prim.indices =
-          make_index_buffer_accessor(model, draw_to_start[effect_idx][draw_idx],
-                                     draw_to_count[effect_idx][draw_idx], index_buffer_view);
+
+      if (prim.material > 0) {
+        model.materials[prim.material].extras = tinygltf::Value(tinygltf::Value::Object{
+            {"og_effect_idx", tinygltf::Value((int)effect_idx)},
+            {"og_draw_idx", tinygltf::Value((int)draw_idx)},
+            {"og_draw_mode", tinygltf::Value((int)draw.mode.as_int())},
+            {"og_envmap_mode", tinygltf::Value((int)effect.envmap_mode.as_int())},
+            {"og_has_envmap", tinygltf::Value((int)effect.has_envmap)},
+            {"og_eye_id", tinygltf::Value((int)draw.eye_id)},
+            {"og_tree_tex_id", tinygltf::Value((int)draw.tree_tex_id)},
+            {"og_has_mod_draw", tinygltf::Value((int)effect.has_mod_draw)},
+        });
+      }
+
+      prim.indices = make_index_buffer_accessor(model, draw_to_start[effect_idx][draw_idx],
+                                                draw_to_count[effect_idx][draw_idx],
+                                                index_buffer_view, (int)effect_idx, (int)draw_idx);
       prim.attributes["POSITION"] = position_buffer_accessor;
       prim.attributes["TEXCOORD_0"] = texture_buffer_accessor;
       prim.attributes["COLOR_0"] = colors;
