@@ -193,7 +193,77 @@ std::vector<JointsAndWeights> extract_and_flatten_joints_and_weights(
   return ret;
 }
 
-std::vector<math::Vector<u8, 4>> colors_from_attribute(const tinygltf::Model& model, int attrib) {
+// COLOR_n as normalized floats. VEC3 -> has_alpha = false, w left at 0.
+std::vector<math::Vector4f> colors_from_attribute_float(const tinygltf::Model& model,
+                                                        int attrib,
+                                                        bool* has_alpha) {
+  const auto& attrib_accessor = model.accessors[attrib];
+  const auto& buffer_view = model.bufferViews[attrib_accessor.bufferView];
+  const auto& buffer = model.buffers[buffer_view.buffer];
+  const u8* data_ptr = buffer.data.data() + buffer_view.byteOffset + attrib_accessor.byteOffset;
+  const int comp_size = tinygltf::GetComponentSizeInBytes(attrib_accessor.componentType);
+  const auto byte_stride = attrib_accessor.ByteStride(buffer_view);
+  const auto count = attrib_accessor.count;
+  if (attrib_accessor.type != TINYGLTF_TYPE_VEC3 && attrib_accessor.type != TINYGLTF_TYPE_VEC4) {
+    lg::die("Unknown attribute type for color {}", attrib_accessor.type);
+  }
+  int n = attrib_accessor.type == TINYGLTF_TYPE_VEC3 ? 3 : 4;
+  *has_alpha = n == 4;
+  auto read = [&](const u8* p) -> float {
+    switch (attrib_accessor.componentType) {
+      case TINYGLTF_COMPONENT_TYPE_FLOAT: {
+        float f;
+        memcpy(&f, p, 4);
+        return f;
+      }
+      case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+        u16 v;
+        memcpy(&v, p, 2);
+        return v / 65535.f;
+      }
+      case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+        return p[0] / 255.f;
+      default:
+        lg::die("Unknown component type for color {}", attrib_accessor.componentType);
+        return 0.f;
+    }
+  };
+  std::vector<math::Vector4f> colors;
+  colors.reserve(count);
+
+  for (u32 i = 0; i < count; i++) {
+    math::Vector4f c;
+    c.x() = read(data_ptr + 0 * comp_size);
+    c.y() = read(data_ptr + 1 * comp_size);
+    c.z() = read(data_ptr + 2 * comp_size);
+    c.w() = n == 4 ? read(data_ptr + 3 * comp_size) : 0.f;
+    colors.push_back(c);
+    data_ptr += byte_stride;
+  }
+  return colors;
+}
+
+std::vector<math::Vector<u8, 4>> colors_from_attribute(const tinygltf::Model& model,
+                                                       int attrib,
+                                                       VertexColorEncoding convert_colors) {
+  if (convert_colors == VertexColorEncoding::PS2_SRGB) {
+    bool has_alpha;
+    auto floats = colors_from_attribute_float(model, attrib, &has_alpha);
+    std::vector<math::Vector<u8, 4>> colors;
+    colors.reserve(floats.size());
+    auto to_srgb_byte = [](float l) {
+      return std::round(linear_to_srgb(std::clamp(l, 0.f, 1.f)) * 255.f);
+    };
+    auto to_byte = [](float a) { return std::round(std::clamp(a, 0.f, 1.f) * 255.f); };
+
+    for (const auto& f : floats) {
+      colors.push_back(math::Vector<u8, 4>(to_srgb_byte(f.x()), to_srgb_byte(f.y()),
+                                           to_srgb_byte(f.z()),
+                                           has_alpha ? to_byte(f.w()) : 128.f));
+    }
+    return colors;
+  }
+
   const auto attrib_accessor = model.accessors[attrib];
   const auto& buffer_view = model.bufferViews[attrib_accessor.bufferView];
   const auto& buffer = model.buffers[buffer_view.buffer];
@@ -241,7 +311,8 @@ ExtractedVertices gltf_vertices(const tinygltf::Model& model,
                                 const math::Matrix4f& w_T_local,
                                 bool get_colors,
                                 bool get_normals,
-                                const std::string& debug_name) {
+                                const std::string& debug_name,
+                                VertexColorEncoding convert_colors) {
   std::vector<tfrag3::PreloadedVertex> result;
   std::vector<math::Vector<u8, 32>> vtx_colors;
 
@@ -290,7 +361,7 @@ ExtractedVertices gltf_vertices(const tinygltf::Model& model,
 
     for (auto& slot : times_of_day) {
       if (const auto attr_val = attributes.find(slot.first); attr_val != attributes.end()) {
-        slot.second = colors_from_attribute(model, attr_val->second);
+        slot.second = colors_from_attribute(model, attr_val->second, convert_colors);
         found_one = true;
       } else {
         found_all = false;
@@ -299,7 +370,7 @@ ExtractedVertices gltf_vertices(const tinygltf::Model& model,
 
     if (!found_one) {
       if (const auto color0_iter = attributes.find("COLOR_0"); color0_iter != attributes.end()) {
-        color0 = colors_from_attribute(model, color0_iter->second);
+        color0 = colors_from_attribute(model, color0_iter->second, convert_colors);
         lg::warn("{} had colors but no times of day, using COLOR_0.", debug_name);
       } else {
         const u32 WHITE_COLOR =

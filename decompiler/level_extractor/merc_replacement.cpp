@@ -46,8 +46,8 @@ void extract(tfrag3::MercModel& mdl,
             model, prim.indices, out.new_vertices.size() + vertex_offset);
         ASSERT_MSG(prim.mode == TINYGLTF_MODE_TRIANGLES, "Unsupported triangle mode");
         // extract vertices
-        auto verts =
-            gltf_util::gltf_vertices(model, prim.attributes, n.w_T_node, true, true, mesh.name);
+        auto verts = gltf_util::gltf_vertices(model, prim.attributes, n.w_T_node, true, true,
+                                              mesh.name, gltf_util::VertexColorEncoding::PS2_SRGB);
         out.new_vertices.insert(out.new_vertices.end(), verts.vtx.begin(), verts.vtx.end());
         out.new_colors.insert(out.new_colors.end(), verts.vtx_colors.begin(),
                               verts.vtx_colors.end());

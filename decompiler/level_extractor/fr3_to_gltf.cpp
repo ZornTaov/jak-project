@@ -7,6 +7,7 @@
 #include "common/custom_data/Tfrag3Data.h"
 #include "common/math/Vector.h"
 #include "common/math/geometry.h"
+#include "common/util/gltf_util.h"
 
 #include "decompiler/level_extractor/tfrag_tie_fixup.h"
 
@@ -386,9 +387,10 @@ int make_color_buffer_accessor(const std::vector<tfrag3::MercVertex>& vertices,
 
   for (size_t i = 0; i < vertices.size(); i++) {
     for (int j = 0; j < 3; j++) {
-      floats.push_back(((float)vertices[i].rgba[j]) / 255.f);
+      floats.push_back(gltf_util::srgb_to_linear((vertices[i].rgba[j]) / 255.f));
     }
-    floats.push_back(1.f);
+    // alpha is linear
+    floats.push_back(vertices[i].rgba[3] / 255.f);
   }
   memcpy(buffer.data.data(), floats.data(), sizeof(float) * floats.size());
 

@@ -35,9 +35,27 @@ struct JointsAndWeights {
   math::Vector<float, 3> weights = math::Vector<float, 3>::zero();
 };
 
+inline float srgb_to_linear(float c) {
+  return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+inline float linear_to_srgb(float l) {
+  return l <= 0.0031308f ? l * 12.92f : 1.055f * std::pow(l, 1.f / 2.4f) - 0.055f;
+}
+
+// PS2_SRGB: linear_to_srgb, round, VEC3 alpha 128
+enum class VertexColorEncoding { LINEAR_0_255, PS2_SRGB };
+
 int extras_int(const tinygltf::Value& extras, const std::string& key, int fallback);
 std::vector<math::Vector3f> extract_vec3f(const u8* data, u32 count, u32 stride);
 std::vector<math::Vector2f> extract_vec2f(const u8* data, u32 count, u32 stride);
+// COLOR_n as normalized floats. VEC3 -> has_alpha = false, w left at 0.
+std::vector<math::Vector4f> colors_from_attribute_float(const tinygltf::Model& model,
+                                                        int attrib,
+                                                        bool* has_alpha);
+std::vector<math::Vector<u8, 4>> colors_from_attribute(
+    const tinygltf::Model& model,
+    int attrib,
+    VertexColorEncoding convert_colors = VertexColorEncoding::LINEAR_0_255);
 std::vector<math::Vector<u8, 4>> extract_color_from_vec4_u16(const u8* data, u32 count, u32 stride);
 std::vector<u32> gltf_index_buffer(const tinygltf::Model& model, int indices_idx, u32 index_offset);
 std::vector<math::Matrix4f> extract_mat4(const tinygltf::Model& model, int accessor_idx);
@@ -51,12 +69,14 @@ struct ExtractedVertices {
   std::vector<math::Vector3f> normals;
 };
 
-ExtractedVertices gltf_vertices(const tinygltf::Model& model,
-                                const std::map<std::string, int>& attributes,
-                                const math::Matrix4f& w_T_local,
-                                bool get_colors,
-                                bool get_normals,
-                                const std::string& debug_name);
+ExtractedVertices gltf_vertices(
+    const tinygltf::Model& model,
+    const std::map<std::string, int>& attributes,
+    const math::Matrix4f& w_T_local,
+    bool get_colors,
+    bool get_normals,
+    const std::string& debug_name,
+    VertexColorEncoding convert_colors = VertexColorEncoding::LINEAR_0_255);
 DrawMode make_default_draw_mode();
 
 struct TexturePool {
