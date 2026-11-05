@@ -159,15 +159,34 @@ void extract(tfrag3::MercModel& mdl,
     const auto& mat = model.materials[mat_idx];
     bool is_envmap = gltf_util::envmap_is_valid(mat);
     int target_effect = -1;
-    for (size_t i = 0; i < mdl.effects.size(); i++) {
-      if (mdl.effects[i].has_envmap == is_envmap) {
-        target_effect = (int)i;
-        lg::info("{}: placing material '{}' in effect {}", mdl.name, mat.name, target_effect);
-        break;
+    if (out.new_model.effects[0].all_draws.empty()) {
+      // if the first effect is empty, just put it there
+      target_effect = 0;
+      lg::info("{}: placing material '{}' in effect 0 (first effect is empty)", mdl.name, mat.name);
+    }
+    if (target_effect == -1) {
+      // an effect that already holds draws of the same kind
+      for (size_t i = 0; i < out.new_model.effects.size(); i++) {
+        const auto& ne = out.new_model.effects[i];
+        if (!ne.all_draws.empty() && ne.has_envmap == is_envmap) {
+          target_effect = (int)i;
+          lg::info("{}: placing material '{}' in effect {}", mdl.name, mat.name, target_effect);
+          break;
+        }
       }
     }
     if (target_effect == -1) {
-      lg::warn("{}: no {} effect in the original model for material '{}', using effect 0", mdl.name,
+      // otherwise the first unused effect; place_draw gives it this draw's kind
+      for (size_t i = 0; i < out.new_model.effects.size(); i++) {
+        if (out.new_model.effects[i].all_draws.empty()) {
+          target_effect = (int)i;
+          lg::info("{}: placing material '{}' in effect {}", mdl.name, mat.name, target_effect);
+          break;
+        }
+      }
+    }
+    if (target_effect == -1) {
+      lg::warn("{}: no free or matching {} effect for material '{}', using effect 0", mdl.name,
                is_envmap ? "envmap" : "normal", mat.name);
       target_effect = 0;
     }
