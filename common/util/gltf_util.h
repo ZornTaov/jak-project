@@ -45,6 +45,8 @@ inline float linear_to_srgb(float l) {
 // PS2_SRGB: linear_to_srgb, round, VEC3 alpha 128
 enum class VertexColorEncoding { LINEAR_0_255, PS2_SRGB };
 
+bool draw_mode_from_extras(const tinygltf::Material& mat, const std::string& key, DrawMode& out);
+
 int extras_int(const tinygltf::Value& extras, const std::string& key, int fallback);
 std::vector<math::Vector3f> extract_vec3f(const u8* data, u32 count, u32 stride);
 std::vector<math::Vector2f> extract_vec2f(const u8* data, u32 count, u32 stride);

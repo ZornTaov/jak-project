@@ -433,6 +433,9 @@ class DrawMode {
     GEQUAL = 2,
   };
 
+  explicit DrawMode(u32 val) : m_val(val) {}
+  DrawMode() {}
+
   bool get_depth_write_enable() const { return m_val & 0b1; }
   void enable_depth_write() { m_val = m_val | 0b1; }
   void disable_depth_write() { m_val = m_val & ~(0b1); }
@@ -564,6 +567,7 @@ class DrawMode {
 
   u32& as_int() { return m_val; }
   const u32& as_int() const { return m_val; }
+  void from_int(u32 val) { m_val = val; }
 
   bool operator==(const DrawMode& other) const { return m_val == other.m_val; }
   bool operator!=(const DrawMode& other) const { return m_val != other.m_val; }
