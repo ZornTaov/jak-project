@@ -80,6 +80,10 @@ void extract(tfrag3::MercModel& mdl,
         draw.mode = gltf_util::make_default_draw_mode();  // todo rm
         draw.tree_tex_id = 0;                             // todo rm
         draw.num_triangles += prim_indices.size() / 3;
+        int eye_id = extras_int(model.materials[prim.material].extras, "og_eye_id", 0xff);
+        if (eye_id != 0xff && eye_id >= 0 && eye_id < 255) {
+          draw.eye_id = (u8)eye_id;
+        }
         draw.no_strip = true;
         draw.index_count = prim_indices.size();
         draw.first_index = index_offset + out.new_indices.size();
