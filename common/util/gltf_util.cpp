@@ -911,6 +911,16 @@ tfrag3::PackedTimeOfDay pack_time_of_day(const std::vector<math::Vector<u8, 32>>
   return colors;
 }
 
+bool draw_mode_from_extras(const tinygltf::Material& mat, const std::string& key, DrawMode& out) {
+  const auto& extras = mat.extras;
+  if (!extras.Has(key) || !extras.Get(key).IsNumber()) {
+    // don't change the draw mode, it's likely default here
+    return false;
+  }
+  out = DrawMode(extras.Get(key).GetNumberAsInt());
+  return true;
+}
+
 void process_normal_merc_draw(const tinygltf::Model& model,
                               MercExtractData& out,
                               u32 tex_offset,
@@ -927,6 +937,7 @@ void process_normal_merc_draw(const tinygltf::Model& model,
     return;
   }
   const auto& mat = model.materials[mat_idx];
+  bool has_og_mode = draw_mode_from_extras(mat, "og_draw_mode", draw.mode);
   int tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index;
   if (tex_idx == -1) {
     lg::warn("Material {} has no texture, using default texture.", mat.name);
@@ -937,9 +948,10 @@ void process_normal_merc_draw(const tinygltf::Model& model,
   const auto& tex = model.textures[tex_idx];
   ASSERT(tex.sampler >= 0);
   ASSERT(tex.source >= 0);
-  gltf_util::setup_draw_mode_from_sampler(model.samplers.at(tex.sampler), &draw.mode);
-  gltf_util::setup_alpha_from_material(mat, &draw.mode);
-
+  if (!has_og_mode) {
+    gltf_util::setup_draw_mode_from_sampler(model.samplers.at(tex.sampler), &draw.mode);
+    gltf_util::setup_alpha_from_material(mat, &draw.mode);
+  }
   const auto& img = model.images[tex.source];
   draw.tree_tex_id = tex_offset + texture_pool_add_texture(&out.tex_pool, img);
 };
@@ -960,6 +972,7 @@ void process_envmap_merc_draw(const tinygltf::Model& model,
     return;
   }
   const auto& mat = model.materials[mat_idx];
+  bool has_og_mode = draw_mode_from_extras(mat, "og_draw_mode", draw.mode);
   int base_tex_idx = mat.pbrMetallicRoughness.baseColorTexture.index;
   if (base_tex_idx == -1) {
     lg::warn("Envmap material {} has no texture, using default texture.", mat.name);
@@ -970,8 +983,10 @@ void process_envmap_merc_draw(const tinygltf::Model& model,
   const auto& base_tex = model.textures[base_tex_idx];
   ASSERT(base_tex.sampler >= 0);
   ASSERT(base_tex.source >= 0);
-  gltf_util::setup_draw_mode_from_sampler(model.samplers.at(base_tex.sampler), &draw.mode);
-  gltf_util::setup_alpha_from_material(mat, &draw.mode);
+  if (!has_og_mode) {
+    gltf_util::setup_draw_mode_from_sampler(model.samplers.at(base_tex.sampler), &draw.mode);
+    gltf_util::setup_alpha_from_material(mat, &draw.mode);
+  }
   const auto& roughness_tex =
       model.textures.at(mat.pbrMetallicRoughness.metallicRoughnessTexture.index);
   ASSERT(roughness_tex.sampler >= 0);
@@ -988,11 +1003,13 @@ void process_envmap_merc_draw(const tinygltf::Model& model,
   ASSERT(envmap_tex.sampler >= 0);
   ASSERT(envmap_tex.source >= 0);
   auto env_mode = gltf_util::make_default_draw_mode();
-  gltf_util::setup_draw_mode_from_sampler(model.samplers.at(envmap_tex.sampler), &env_mode);
   eff.envmap_texture = tex_offset + gltf_util::texture_pool_add_texture(
                                         &out.tex_pool, model.images[envmap_tex.source]);
-  env_mode.set_alpha_blend(DrawMode::AlphaBlend::SRC_0_DST_DST);
-  env_mode.enable_ab();
+  if (!draw_mode_from_extras(mat, "og_envmap_mode", env_mode)) {
+    gltf_util::setup_draw_mode_from_sampler(model.samplers.at(envmap_tex.sampler), &env_mode);
+    env_mode.set_alpha_blend(DrawMode::AlphaBlend::SRC_0_DST_DST);
+    env_mode.enable_ab();
+  }
   eff.envmap_mode = env_mode;
 };
 
