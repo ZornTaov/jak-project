@@ -47,10 +47,10 @@ void unstrip_shrub_draws(const std::vector<u32>& stripped_indices,
                          std::vector<u32>& draw_to_count,
                          const std::vector<tfrag3::ShrubDraw>& draws) {
   for (auto& draw : draws) {
-    draw_to_start.push_back(unstripped.size());
+    draw_to_start.push_back((u32)unstripped.size());
 
-    for (size_t i = 2; i < draw.num_indices; i++) {
-      int idx = i + draw.first_index_index;
+    for (u32 i = 2; i < draw.num_indices; i++) {
+      u32 idx = i + draw.first_index_index;
       u32 a = stripped_indices[idx];
       u32 b = stripped_indices[idx - 1];
       u32 c = stripped_indices[idx - 2];
@@ -61,7 +61,7 @@ void unstrip_shrub_draws(const std::vector<u32>& stripped_indices,
       unstripped.push_back(b);
       unstripped.push_back(c);
     }
-    draw_to_count.push_back(unstripped.size() - draw_to_start.back());
+    draw_to_count.push_back((u32)(unstripped.size() - draw_to_start.back()));
   }
 }
 
@@ -76,7 +76,7 @@ void unstrip_tie_wind(std::vector<u32>& unstripped,
     int grp_offset = 0;
 
     for (const auto& grp : draw.instance_groups) {
-      starts.push_back(unstripped.size());
+      starts.push_back((u32)unstripped.size());
 
       for (size_t i = grp_offset + 2; i < grp_offset + grp.num; i++) {
         u32 a = draw.vertex_index_stream.at(i);
@@ -89,7 +89,7 @@ void unstrip_tie_wind(std::vector<u32>& unstripped,
         unstripped.push_back(b);
         unstripped.push_back(c);
       }
-      counts.push_back(unstripped.size() - starts.back());
+      counts.push_back((u32)(unstripped.size() - starts.back()));
       grp_offset += grp.num;
     }
   }
@@ -142,13 +142,13 @@ void unstrip_merc_draws(const std::vector<u32>& stripped_indices,
     auto& effect_dts = draw_to_start.emplace_back();
     auto& effect_dtc = draw_to_count.emplace_back();
     for (auto& draw : effect.all_draws) {
-      effect_dts.push_back(unstripped.size());
+      effect_dts.push_back((u32)unstripped.size());
 
       // a triangle strip flips every other triangle, so un-flip them here. the toggle restarts
       // with each strip.
       bool toggle = false;
       for (size_t i = 2; i < draw.index_count; i++) {
-        int idx = i + draw.first_index;
+        int idx = (int)i + (int)draw.first_index;
         u32 a = stripped_indices[idx];
         u32 b = stripped_indices[idx - 1];
         u32 c = stripped_indices[idx - 2];
@@ -163,7 +163,7 @@ void unstrip_merc_draws(const std::vector<u32>& stripped_indices,
         toggle = !toggle;
       }
       flush_strip();
-      effect_dtc.push_back(unstripped.size() - effect_dts.back());
+      effect_dtc.push_back((u32)(unstripped.size() - effect_dts.back()));
     }
   }
 }
@@ -196,11 +196,9 @@ int make_position_buffer_accessor(const std::vector<T>& vertices, tinygltf::Mode
   // and fill it
   u8* buffer_ptr = buffer.data.data();
   // track min/max for accessor
-  math::Vector3f min = {std::numeric_limits<float>::max(), 
-                        std::numeric_limits<float>::max(),
+  math::Vector3f min = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
                         std::numeric_limits<float>::max()};
-  math::Vector3f max = {std::numeric_limits<float>::lowest(), 
-                        std::numeric_limits<float>::lowest(),
+  math::Vector3f max = {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(),
                         std::numeric_limits<float>::lowest()};
   for (const auto& vtx : vertices) {
     if constexpr (std::is_same<T, tfrag3::MercVertex>::value) {
@@ -227,6 +225,7 @@ int make_position_buffer_accessor(const std::vector<T>& vertices, tinygltf::Mode
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "POSITION";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -235,6 +234,7 @@ int make_position_buffer_accessor(const std::vector<T>& vertices, tinygltf::Mode
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "POSITION";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -274,6 +274,7 @@ int make_tex_buffer_accessor(const std::vector<T>& vertices, tinygltf::Model& mo
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "TEXCOORD_0";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -282,6 +283,7 @@ int make_tex_buffer_accessor(const std::vector<T>& vertices, tinygltf::Model& mo
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "TEXCOORD_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -317,6 +319,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::PreloadedVertex>& verti
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "COLOR_" + std::to_string(time_of_day);
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -325,6 +328,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::PreloadedVertex>& verti
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "COLOR_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -360,6 +364,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::PreloadedVertex>& verti
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "COLOR_" + std::to_string(time_of_day);
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -368,6 +373,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::PreloadedVertex>& verti
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "COLOR_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -397,6 +403,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::MercVertex>& vertices,
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "COLOR_0";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -405,6 +412,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::MercVertex>& vertices,
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "COLOR_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -441,6 +449,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::ShrubGpuVertex>& vertic
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "COLOR_0";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -449,6 +458,7 @@ int make_color_buffer_accessor(const std::vector<tfrag3::ShrubGpuVertex>& vertic
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "COLOR_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -480,6 +490,7 @@ int make_tfrag_tie_index_buffer_view(const std::vector<u32>& indices,
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "tfrag_tie_indices";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -506,6 +517,7 @@ int make_tie_wind_index_buffer_view(const std::vector<tfrag3::InstancedStripDraw
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "tie_indices";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -537,6 +549,7 @@ int make_shrub_index_buffer_view(const std::vector<u32>& indices,
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "shrub_indices";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -557,6 +570,7 @@ int make_merc_index_buffer_view(const std::vector<u32>& unstripped, tinygltf::Mo
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "merc_indices";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -571,6 +585,7 @@ int make_index_buffer_accessor(tinygltf::Model& model,
                                int buffer_view_idx) {
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "indices_" + std::to_string(accessor_idx);
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = sizeof(u32) * idx_map.at(draw.unpacked.idx_of_first_idx_in_full_buffer);
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT;
@@ -580,9 +595,15 @@ int make_index_buffer_accessor(tinygltf::Model& model,
   return accessor_idx;
 }
 
-int make_index_buffer_accessor(tinygltf::Model& model, u32 start, u32 count, int buffer_view_idx) {
+int make_index_buffer_accessor(tinygltf::Model& model,
+                               u32 start,
+                               u32 count,
+                               int buffer_view_idx,
+                               int effect_idx,
+                               int draw_idx) {
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "indices_" + std::to_string(effect_idx) + "_" + std::to_string(draw_idx);
   accessor.bufferView = buffer_view_idx;
 
   accessor.byteOffset = sizeof(u32) * start;
@@ -775,7 +796,7 @@ void add_tfrag(const tfrag3::Level& level,
   std::vector<u32> index_map;
   int index_buffer_view = make_tfrag_tie_index_buffer_view(
       tfrag.unpacked.indices, extract_positions(tfrag.unpacked.vertices), model, index_map);
-  int colors[kMaxColor];
+  int colors[kMaxColor]{};
 
   for (int i = 0; i < kMaxColor; i++) {
     colors[i] = make_color_buffer_accessor(tfrag.unpacked.vertices, model, tfrag, i);
@@ -873,7 +894,7 @@ int make_tie_index_buffer_view_by_proto(const tfrag3::TieTree& tie,
 
   std::vector<u32> grouped;
   for (const auto& [key, ranges] : src_ranges) {
-    const u32 start = grouped.size();
+    const u32 start = (u32)grouped.size();
     for (const auto& [src, count] : ranges) {
       grouped.insert(grouped.end(), unstripped.begin() + src, unstripped.begin() + src + count);
     }
@@ -919,7 +940,7 @@ void add_tie(const tfrag3::Level& level,
 
   int position_buffer_accessor = make_position_buffer_accessor(tie.unpacked.vertices, model);
   int texture_buffer_accessor = make_tex_buffer_accessor(tie.unpacked.vertices, model, 1.f);
-  int colors[kMaxColor];
+  int colors[kMaxColor]{};
 
   for (int i = 0; i < kMaxColor; i++) {
     colors[i] = make_color_buffer_accessor(tie.unpacked.vertices, model, tie, i);
@@ -975,7 +996,8 @@ void add_tie(const tfrag3::Level& level,
 
     auto& prim = model.meshes[mesh_idx].primitives.emplace_back();
     prim.material = draw_material.at(key.draw_idx);
-    prim.indices = make_index_buffer_accessor(model, range.start, range.count, index_buffer_view);
+    prim.indices =
+        make_index_buffer_accessor(model, range.start, range.count, index_buffer_view, 0, 0);
     prim.attributes["POSITION"] = position_buffer_accessor;
     prim.attributes["TEXCOORD_0"] = texture_buffer_accessor;
     for (int i = 0; i < kMaxColor; i++) {
@@ -1013,9 +1035,9 @@ void add_tie(const tfrag3::Level& level,
         }
 
         prim.material = mat;
-        prim.indices = make_index_buffer_accessor(model, draw_to_starts.at(draw_idx).at(grp_idx),
-                                                  draw_to_counts.at(draw_idx).at(grp_idx),
-                                                  wind_index_buffer_view);
+        prim.indices = make_index_buffer_accessor(
+            model, draw_to_starts.at(draw_idx).at(grp_idx), draw_to_counts.at(draw_idx).at(grp_idx),
+            wind_index_buffer_view, (int)grp_idx, (int)draw_idx);
         prim.attributes["POSITION"] = position_buffer_accessor;
         prim.attributes["TEXCOORD_0"] = texture_buffer_accessor;
         for (int i = 0; i < kMaxColor; i++) {
@@ -1048,7 +1070,7 @@ void add_shrub(const tfrag3::Level& level,
   std::vector<u32> draw_to_start, draw_to_count;
   int index_buffer_view = make_shrub_index_buffer_view(shrub.indices, shrub.static_draws, model,
                                                        draw_to_start, draw_to_count);
-  int colors[kMaxColor];
+  int colors[kMaxColor]{};
   for (int i = 0; i < kMaxColor; i++) {
     colors[i] = make_color_buffer_accessor(shrub.unpacked.vertices, model, shrub, i);
   }
@@ -1072,8 +1094,8 @@ void add_shrub(const tfrag3::Level& level,
       auto& prim = model.meshes[mesh_idx].primitives.emplace_back();
       prim.material =
           add_material_for_tex(level, model, draw.tree_tex_id, tex_image_map, draw.mode);
-      prim.indices = make_index_buffer_accessor(model, draw_to_start.at(draw_idx),
-                                                draw_to_count.at(draw_idx), index_buffer_view);
+      prim.indices = make_index_buffer_accessor(
+          model, draw_to_start.at(draw_idx), draw_to_count.at(draw_idx), index_buffer_view, 0, 0);
       prim.attributes["POSITION"] = position_buffer_accessor;
       prim.attributes["TEXCOORD_0"] = texture_buffer_accessor;
       for (int i = 0; i < kMaxColor; i++) {
@@ -1101,6 +1123,7 @@ int make_weights_accessor(const std::vector<tfrag3::MercVertex>& vertices, tinyg
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "WEIGHTS_0";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -1109,6 +1132,7 @@ int make_weights_accessor(const std::vector<tfrag3::MercVertex>& vertices, tinyg
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "WEIGHTS_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -1176,6 +1200,7 @@ int make_bones_accessor(const std::vector<tfrag3::MercVertex>& vertices, tinyglt
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "JOINTS_0";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
@@ -1184,6 +1209,7 @@ int make_bones_accessor(const std::vector<tfrag3::MercVertex>& vertices, tinyglt
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "JOINTS_0";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
@@ -1212,14 +1238,15 @@ int make_inv_matrix_bind_poses(const std::vector<level_tools::Joint>& joints,
   // create a view of this buffer
   int buffer_view_idx = (int)model.bufferViews.size();
   auto& buffer_view = model.bufferViews.emplace_back();
+  buffer_view.name = "INV_BIND_MATRICES";
   buffer_view.buffer = buffer_idx;
   buffer_view.byteOffset = 0;
   buffer_view.byteLength = buffer.data.size();
   buffer_view.byteStride = 0;  // tightly packed
-  buffer_view.target = TINYGLTF_TARGET_ARRAY_BUFFER;
 
   int accessor_idx = (int)model.accessors.size();
   auto& accessor = model.accessors.emplace_back();
+  accessor.name = "INV_BIND_MATRICES";
   accessor.bufferView = buffer_view_idx;
   accessor.byteOffset = 0;
   accessor.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -1395,6 +1422,7 @@ int make_anim_float_accessor(const std::vector<float>& values, tinygltf::Model& 
 
   int acc_idx = (int)model.accessors.size();
   auto& acc = model.accessors.emplace_back();
+  acc.name = "ANIM_FLOAT";
   acc.bufferView = bv_idx;
   acc.byteOffset = 0;
   acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -1427,6 +1455,7 @@ int make_anim_vec3_accessor(const std::vector<math::Vector3f>& values, tinygltf:
 
   int acc_idx = (int)model.accessors.size();
   auto& acc = model.accessors.emplace_back();
+  acc.name = "ANIM_VEC3";
   acc.bufferView = bv_idx;
   acc.byteOffset = 0;
   acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -1450,6 +1479,7 @@ int make_anim_vec4_accessor(const std::vector<math::Vector4f>& values, tinygltf:
 
   int acc_idx = (int)model.accessors.size();
   auto& acc = model.accessors.emplace_back();
+  acc.name = "ANIM_VEC4";
   acc.bufferView = bv_idx;
   acc.byteOffset = 0;
   acc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
@@ -1528,11 +1558,9 @@ int make_vec3_float_accessor(const std::vector<float>& data, tinygltf::Model& mo
   memcpy(buffer.data.data(), data.data(), buffer.data.size());
 
   // track min/max for accessor
-  math::Vector3f min = {std::numeric_limits<float>::max(), 
-                        std::numeric_limits<float>::max(),
+  math::Vector3f min = {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
                         std::numeric_limits<float>::max()};
-  math::Vector3f max = {std::numeric_limits<float>::lowest(), 
-                        std::numeric_limits<float>::lowest(),
+  math::Vector3f max = {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest(),
                         std::numeric_limits<float>::lowest()};
   for (size_t i = 0; i < data.size(); i += 3) {
     math::Vector3f xyz = {data[i], data[i + 1], data[i + 2]};
@@ -1713,14 +1741,14 @@ void add_merc(const tfrag3::Level& level,
   node.mesh = mesh_idx;
 
   if (art != art_data.end() && !art->second.joint_group.empty()) {
-    node.skin = model.skins.size();
+    node.skin = (int)model.skins.size();
     auto& skin = model.skins.emplace_back();
     const auto& game_bones = art->second.joint_group;
-    int n_bones = game_bones.size();
+    int n_bones = (int)game_bones.size();
     std::vector<std::vector<int>> children(n_bones);
     for (size_t i = 0; i < game_bones.size(); i++) {
       if (game_bones[i].parent_idx >= 0) {
-        children.at(game_bones[i].parent_idx).push_back(i);
+        children.at(game_bones[i].parent_idx).push_back((int)i);
       }
     }
     int first_joint = (int)model.nodes.size();
@@ -1739,9 +1767,9 @@ void add_merc(const tfrag3::Level& level,
         matrix = unscale_translation(game_bones.at(gbone.parent_idx).bind_pose_T_w) *
                  inverse(unscale_translation(gbone.bind_pose_T_w));
       }
-      
+
       // decompose the matrix into translation, rotation, scale
-      // this could be done with a utility function to clean up all the 
+      // this could be done with a utility function to clean up all the
       // float -> double conversions, but for now this is fine
       auto translation = matrix.translation();
       snode.translation = {translation.x(), translation.y(), translation.z()};
@@ -1749,7 +1777,7 @@ void add_merc(const tfrag3::Level& level,
       snode.rotation = {rotation.x(), rotation.y(), rotation.z(), rotation.w()};
       auto scale = matrix.scale();
       snode.scale = {scale.x(), scale.y(), scale.z()};
-      
+
       for (auto child : children.at(i)) {
         snode.children.push_back(first_joint + child);
       }
