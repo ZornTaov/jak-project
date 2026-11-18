@@ -1321,25 +1321,6 @@ BlercVtxFloat blerc_vertex_convert(const BlercVtxInt& in, float pos_scale) {
 }
 
 /*!
- * Convert floating point data for a single blerc vertex target to the format used by PC blerc code.
- * This includes padding to match the GPU vertex format and keep the vectors 16-byte aligned.
- */
-tfrag3::BlercFloatData to_float_data(const math::Vector3f& pos,
-                                     const math::Vector3f& nrm,
-                                     float scale) {
-  tfrag3::BlercFloatData result;
-  result.v[0] = pos.x() * scale;
-  result.v[1] = pos.y() * scale;
-  result.v[2] = pos.z() * scale;
-  result.v[3] = 0;
-  result.v[4] = nrm.x() * scale;
-  result.v[5] = nrm.y() * scale;
-  result.v[6] = nrm.z() * scale;
-  result.v[7] = 0;
-  return result;
-}
-
-/*!
  * Pack floating point vertices to the format for PC blerc.
  * Currently this is designed with an outer loop over vertices. It's probably not the best thing,
  * but it still beats the unoptimized version by a few times.
@@ -1352,12 +1333,12 @@ tfrag3::Blerc blerc_pack(const std::vector<BlercVtxFloat>& verts) {
     // kor. It could be that merc has some extra vertices that are unpacked twice.
     if (v.dest >= 0) {
       // base is multiplied by 8192, then left shifted by 13, so it cancels
-      blerc.float_data.push_back(to_float_data(v.base.pos, v.base.nrm, 1.f));
+      blerc.float_data.push_back(tfrag3::to_float_data(v.base.pos, v.base.nrm, 1.f));
       for (auto& t : v.targets) {
         // target is multiplied by "weight", then left shifted by 13. So full weight is
         // 8192:
         blerc.int_data.push_back(t.idx);
-        blerc.float_data.push_back(to_float_data(t.pos, t.nrm, 1.f / 8192.f));
+        blerc.float_data.push_back(tfrag3::to_float_data(t.pos, t.nrm, 1.f / 8192.f));
       }
       blerc.int_data.push_back(tfrag3::Blerc::kTargetIdxTerminator);
       blerc.int_data.push_back(v.dest);

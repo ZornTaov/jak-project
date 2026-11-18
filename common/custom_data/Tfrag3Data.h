@@ -86,7 +86,14 @@ struct MemoryUsageTracker {
 // These vertices should be uploaded to the GPU at load time and don't change
 struct PreloadedVertex {
   // the vertex position
-  float x = 0, y = 0, z = 0;
+  union {
+    struct {
+      float x;
+      float y;
+      float z;
+    };
+    math::Vector3f pos = math::Vector3f::zero();
+  };
   // envmap tint color, not used in == or hash.
   u8 r = 0, g = 0, b = 0, a = 0;
   // texture coordinates
@@ -94,7 +101,15 @@ struct PreloadedVertex {
 
   // not used in == or hash!!
   // note that this is a 10-bit 3-element field packed into 32-bits.
-  u32 nor = 0;
+  union {
+    u32 nor = 0;
+    struct {
+      u32 nx : 10;
+      u32 ny : 10;
+      u32 nz : 10;
+      u32 _npad : 2;
+    };
+  };
 
   // color table index
   u16 color_index = 0;
@@ -536,13 +551,29 @@ struct alignas(32) MercVertex {
   };
   float pad1;
 
-  float weights[3];
+  union {
+    float weights[3];
+    math::Vector3f weights_vec;
+  };
   float pad2;
 
-  float st[2];
+  union {
+    float st[2];
+    struct {
+      float s, t;
+    };
+  };
 
-  u8 rgba[4];
-  u8 mats[3];
+  union {
+    u8 rgba[4];
+    struct {
+      u8 r, g, b, a;
+    } color;
+  };
+  union {
+    u8 mats[3];
+    math::Vector<u8, 3> joints;
+  };
   u8 pad3;
 };
 static_assert(sizeof(MercVertex) == 64);
@@ -559,11 +590,38 @@ struct MercDraw {
   void serialize(Serializer& ser);
 };
 
-struct BlercFloatData {
+union BlercFloatData {
   // [x, y, z, pad, nx, ny, nz, pad]
   // note that this should match the layout of the merc vertex above
   alignas(32) float v[8];
+  struct {
+    float x, y, z;
+    float pad0;
+    float nx, ny, nz;
+    float pad1;
+  };
+  struct {
+    math::Vector3f pos;
+    float pad0v;
+    math::Vector3f normal;
+    float pad1v;
+  };
 };
+
+/*!
+ * Convert floating point data for a single blerc vertex target to the format used by PC blerc code.
+ * This includes padding to match the GPU vertex format and keep the vectors 16-byte aligned.
+ */
+inline tfrag3::BlercFloatData to_float_data(const math::Vector3f& pos,
+                                            const math::Vector3f& nrm,
+                                            float scale) {
+  tfrag3::BlercFloatData result;
+  result.pos = pos * scale;
+  result.pad0v = 0;
+  result.normal = nrm * scale;
+  result.pad1v = 0;
+  return result;
+}
 
 /*!
  * Data to modify vertices based on blend shapes.
