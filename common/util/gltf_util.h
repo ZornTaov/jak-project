@@ -71,6 +71,20 @@ struct ExtractedVertices {
   std::vector<math::Vector3f> normals;
 };
 
+struct MorphDelta {
+  u32 target_idx;         // index position in prim.targets
+  math::Vector3f pos;     // in game units (x4096)
+  math::Vector3f normal;  // NOT normalized
+};
+std::vector<math::Vector3f> read_vec3f_attribute(const tinygltf::Model& model,
+                                                 const int accessor_idx,
+                                                 const std::string& what);
+
+std::vector<std::vector<MorphDelta>> gltf_morph_deltas(const tinygltf::Model& model,
+                                                       const tinygltf::Primitive& prim,
+                                                       const math::Matrix4f& w_T_local,
+                                                       const std::string& debug_name);
+
 ExtractedVertices gltf_vertices(
     const tinygltf::Model& model,
     const std::map<std::string, int>& attributes,
@@ -206,16 +220,19 @@ tfrag3::PackedTimeOfDay pack_time_of_day(const std::vector<math::Vector<u8, 32>>
 struct MercExtractData {
   TexturePool tex_pool;
   std::vector<u32> new_indices;
+  std::vector<u32> new_mod_indices;
   std::vector<tfrag3::PreloadedVertex> new_vertices;
   std::vector<math::Vector<u8, 32>> new_colors;
   std::vector<math::Vector3f> normals;
   std::vector<JointsAndWeights> joints_and_weights;
+  std::vector<std::vector<MorphDelta>> morph_deltas;
   tfrag3::MercModel new_model;
 };
 
 // Data produced by loading a replacement model
 struct MercSwapData {
   std::vector<u32> new_indices;
+  std::vector<u32> new_mod_indices;
   std::vector<tfrag3::MercVertex> new_vertices;
   std::vector<tfrag3::Texture> new_textures;
   tfrag3::MercModel new_model;

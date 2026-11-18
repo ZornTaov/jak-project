@@ -24,6 +24,10 @@ void extract(tfrag3::MercModel& mdl,
   }
   bool copy_eye_draws = false;
   bool copy_mod_draws = false;
+  // (node, attribute accessors, morph target accessors) -> global index of the first vertex
+  using VertexKey =
+      std::tuple<int, std::map<std::string, int>, std::vector<std::map<std::string, int>>>;
+  std::map<VertexKey, u32> vertex_base_by_key;
 
   for (const auto& n : all_nodes) {
     const auto& node = model.nodes[n.node_idx];
@@ -41,31 +45,43 @@ void extract(tfrag3::MercModel& mdl,
           node.extras.Has("copy_mod_draws") && node.extras.Get("copy_mod_draws").Get<int>();
       for (const auto& prim : mesh.primitives) {
         prim_count++;
+        // primitives can share one vertex buffer (our exporter does this), so only add each
+        // node + accessor set once and point the other primitives' indices at that copy
+        VertexKey key{n.node_idx, prim.attributes, prim.targets};
+        auto [base_it, is_new] =
+            vertex_base_by_key.try_emplace(key, out.new_vertices.size() + vertex_offset);
         // extract index buffer
-        std::vector<u32> prim_indices = gltf_util::gltf_index_buffer(
-            model, prim.indices, out.new_vertices.size() + vertex_offset);
+        std::vector<u32> prim_indices =
+            gltf_util::gltf_index_buffer(model, prim.indices, base_it->second);
         ASSERT_MSG(prim.mode == TINYGLTF_MODE_TRIANGLES, "Unsupported triangle mode");
-        // extract vertices
-        auto verts = gltf_util::gltf_vertices(model, prim.attributes, n.w_T_node, true, true,
-                                              mesh.name, gltf_util::VertexColorEncoding::PS2_SRGB);
-        out.new_vertices.insert(out.new_vertices.end(), verts.vtx.begin(), verts.vtx.end());
-        out.new_colors.insert(out.new_colors.end(), verts.vtx_colors.begin(),
-                              verts.vtx_colors.end());
-        out.normals.insert(out.normals.end(), verts.normals.begin(), verts.normals.end());
-        ASSERT(out.new_colors.size() == out.new_vertices.size());
+        if (is_new) {
+          // extract vertices
+          auto verts =
+              gltf_util::gltf_vertices(model, prim.attributes, n.w_T_node, true, true, mesh.name,
+                                       gltf_util::VertexColorEncoding::PS2_SRGB);
+          auto morphs = gltf_util::gltf_morph_deltas(model, prim, n.w_T_node, mesh.name);
+          out.new_vertices.insert(out.new_vertices.end(), verts.vtx.begin(), verts.vtx.end());
+          out.new_colors.insert(out.new_colors.end(), verts.vtx_colors.begin(),
+                                verts.vtx_colors.end());
+          out.normals.insert(out.normals.end(), verts.normals.begin(), verts.normals.end());
+          out.morph_deltas.insert(out.morph_deltas.end(), morphs.begin(), morphs.end());
+          ASSERT(out.new_colors.size() == out.new_vertices.size());
+          ASSERT(out.morph_deltas.size() == out.new_vertices.size());
 
-        if (prim.attributes.count("JOINTS_0") && prim.attributes.count("WEIGHTS_0")) {
-          auto joints_and_weights = gltf_util::extract_and_flatten_joints_and_weights(model, prim);
-          ASSERT(joints_and_weights.size() == verts.vtx.size());
-          out.joints_and_weights.insert(out.joints_and_weights.end(), joints_and_weights.begin(),
-                                        joints_and_weights.end());
-        } else {
-          // add fake data for vertices without this data
-          gltf_util::JointsAndWeights dummy;
-          dummy.joints[0] = 3;
-          dummy.weights[0] = 1.f;
-          for (size_t i = 0; i < verts.vtx.size(); i++) {
-            out.joints_and_weights.push_back(dummy);
+          if (prim.attributes.count("JOINTS_0") && prim.attributes.count("WEIGHTS_0")) {
+            auto joints_and_weights =
+                gltf_util::extract_and_flatten_joints_and_weights(model, prim);
+            ASSERT(joints_and_weights.size() == verts.vtx.size());
+            out.joints_and_weights.insert(out.joints_and_weights.end(), joints_and_weights.begin(),
+                                          joints_and_weights.end());
+          } else {
+            // add fake data for vertices without this data
+            gltf_util::JointsAndWeights dummy;
+            dummy.joints[0] = 3;
+            dummy.weights[0] = 1.f;
+            for (size_t i = 0; i < verts.vtx.size(); i++) {
+              out.joints_and_weights.push_back(dummy);
+            }
           }
         }
         ASSERT_MSG(prim.material != -1,
@@ -200,6 +216,140 @@ void extract(tfrag3::MercModel& mdl,
   ASSERT_MSG(!out.new_model.effects[0].all_draws.empty(),
              fmt::format("{}: first effect has no draws, the replacement can't be used", mdl.name));
 
+  // split fix/mod draws per effect per draw per triangle. This is partly the same as
+  // create_modifiable_vertex_data() in extract_merc
+
+  // helper for checking if a vertex has morph deltas, includes vertex_offset
+  auto is_mod = [&](u32 idx) { return !out.morph_deltas[idx - vertex_offset].empty(); };
+
+  // some stats
+  int num_tris = 0;  // all triangles
+  int mod_tris = 0;  // triangles in mod draws
+  int fix_tris = 0;  // triangles in fix draws
+
+  // keep track of indices per effect -> per draw -> per vertex
+  std::vector<std::vector<std::vector<u32>>> inds_per_effect;
+  // loop over "effects" within this model. the pc format merges all fragments in an effect
+  // together.
+  for (size_t ei = 0; ei < out.new_model.effects.size(); ei++) {
+    auto& effect = out.new_model.effects[ei];
+    auto& inds_per_draw = inds_per_effect.emplace_back();
+
+    // loop over draw calls within this effect, and determine if it's fixed, modifiable, or needs
+    // to be split up. For mod draws, this just figures which vertices go which the draw, using
+    // the indices in the original vertex buffer.
+    for (const auto& draw : effect.all_draws) {
+      num_tris += draw.num_triangles;
+
+      bool found_fixed = false;
+      bool found_mod = false;
+      for (size_t i = 0; i < draw.index_count; i++) {
+        auto idx = out.new_indices[draw.first_index - index_offset + i];
+        if (is_mod(idx)) {
+          found_mod = true;
+        } else {
+          found_fixed = true;
+        }
+      }
+
+      if (!found_fixed && !found_mod) {
+        // nothing found at all, bad
+        ASSERT_NOT_REACHED();
+      } else if (found_fixed && !found_mod) {
+        // only fixed. can just copy the fixed draw. This can reuse the index buffer data
+        // we already added for this effect.
+        effect.mod.fix_draw.push_back(draw);
+        fix_tris += draw.num_triangles;
+      } else if (found_mod && !found_fixed) {
+        // only mod. Add the entire draw
+        effect.mod.mod_draw.push_back(draw);
+        // remember the indices _in the main buffer_ for these vertices.
+        auto& inds_out = inds_per_draw.emplace_back();
+        for (u32 i = 0; i < draw.index_count; i++) {
+          inds_out.push_back(out.new_indices.at(draw.first_index - index_offset + i));
+        }
+        mod_tris += draw.num_triangles;
+      } else {
+        // mixed fix/mod
+        // create the two draws
+        tfrag3::MercDraw mod = draw;
+        tfrag3::MercDraw fix = draw;
+        std::vector<u32> mod_ind, fix_ind;
+        for (size_t i = 0; i < draw.index_count; i += 3) {
+          u32 a = out.new_indices.at(draw.first_index - index_offset + i);
+          u32 b = out.new_indices.at(draw.first_index - index_offset + i + 1);
+          u32 c = out.new_indices.at(draw.first_index - index_offset + i + 2);
+
+          if (is_mod(a) || is_mod(b) || is_mod(c)) {
+            // add to mod
+            mod_ind.insert(mod_ind.end(), {a, b, c});
+          } else {
+            // add to fix
+            fix_ind.insert(fix_ind.end(), {a, b, c});
+          }
+        }
+
+        // add into the effect's mod and fix mods
+        inds_per_draw.push_back(mod_ind);
+        mod.index_count = mod_ind.size();
+        ASSERT(mod.index_count % 3 == 0);
+        mod.num_triangles = mod_ind.size() / 3;
+        effect.mod.mod_draw.push_back(mod);
+        mod_tris += mod.num_triangles;
+
+        if (!fix_ind.empty()) {
+          fix.first_index = out.new_indices.size() + index_offset;
+          fix.index_count = fix_ind.size();
+          out.new_indices.insert(out.new_indices.end(), fix_ind.begin(), fix_ind.end());
+          ASSERT(fix.index_count % 3 == 0);
+          fix.num_triangles = fix_ind.size() / 3;
+          effect.mod.fix_draw.push_back(fix);
+          fix_tris += fix.num_triangles;
+        }
+      }
+      ASSERT(num_tris == mod_tris + fix_tris);
+    }
+    // if there are no modifiable draws, we can't possible modify anything, so not worth
+    // storing the fixed draws
+    if (effect.mod.mod_draw.empty()) {
+      effect.mod.fix_draw.clear();
+    } else {
+      effect.has_mod_draw = true;
+
+      size_t mod_start = out.new_mod_indices.size();
+      std::unordered_map<u32, u32> vtx_to_mod_vtx;
+      ASSERT(inds_per_draw.size() == effect.mod.mod_draw.size());
+      for (size_t mdi = 0; mdi < effect.mod.mod_draw.size(); mdi++) {
+        auto& draw = effect.mod.mod_draw[mdi];
+        draw.first_index = out.new_mod_indices.size();
+
+        for (u32 vidx : inds_per_draw[mdi]) {
+          // look up vidx in vtx_to_mod_vtx
+          auto exists = vtx_to_mod_vtx.find(vidx);
+          if (exists != vtx_to_mod_vtx.end()) {
+            out.new_mod_indices.push_back(exists->second);
+          } else {
+            u32 idx = effect.mod.mod_to_global_vertex_idx.size();
+            vtx_to_mod_vtx[vidx] = idx;
+
+            effect.mod.mod_to_global_vertex_idx.push_back(vidx);
+            out.new_mod_indices.push_back(idx);
+          }
+        }
+      }
+      size_t mod_idx_total = 0;
+      for (const auto& d : effect.mod.mod_draw)
+        mod_idx_total += d.index_count;
+      ASSERT(out.new_mod_indices.size() - mod_start == mod_idx_total);
+    }
+  }
+  // mod slices are placed after new_indices later, so add the offsets to them
+  u32 mod_base = index_offset + out.new_indices.size();
+  for (auto& effect : out.new_model.effects) {
+    for (auto& draw : effect.mod.mod_draw) {
+      draw.first_index += mod_base;
+    }
+  }
   // copy any effects from the old model that used mod or eye draws
   if (copy_eye_draws || copy_mod_draws) {
     for (auto& old_eff : mdl.effects) {
@@ -228,6 +378,9 @@ void extract(tfrag3::MercModel& mdl,
 
   for (auto& effect : out.new_model.effects) {
     out.new_model.max_draws += effect.all_draws.size();
+    if (effect.has_mod_draw) {
+      out.new_model.max_draws += effect.mod.mod_draw.size() + effect.mod.fix_draw.size();
+    }
   }
   int count = [&]() {
     int c = 0;
@@ -326,7 +479,7 @@ void extract(const std::string& name,
   out.new_model.max_draws = 0;
 
   for (const auto& [mat_idx, d_] : draw_by_material) {
-    const auto& mat = model.materials[mat_idx];
+    // const auto& mat = model.materials[mat_idx];
     if (mat_idx < 0 || !gltf_util::material_has_envmap(model.materials[mat_idx]) ||
         !gltf_util::envmap_is_valid(model.materials[mat_idx])) {
       gltf_util::process_normal_merc_draw(model, out, tex_offset, e, mat_idx, d_);
@@ -376,12 +529,43 @@ const tfrag3::MercVertex& find_closest(const std::vector<tfrag3::MercVertex>& ol
   return old[best_idx];
 }
 
+// copies in vert indices for effect mods, and packs blercs
+void fill_mod_vertices(MercSwapData& out, const MercExtractData& in, u32 vertex_offset) {
+  for (auto& effect : out.new_model.effects) {
+    if (!effect.mod.vertices.empty())
+      continue;
+    for (u32 g : effect.mod.mod_to_global_vertex_idx) {
+      effect.mod.vertices.push_back(out.new_vertices.at(g - vertex_offset));
+    }
+    auto& blerc = effect.mod.blerc;
+    for (u32 vi = 0; vi < effect.mod.vertices.size(); vi++) {
+      const auto& deltas =
+          in.morph_deltas.at(effect.mod.mod_to_global_vertex_idx[vi] - vertex_offset);
+      if (deltas.empty())
+        continue;
+      // base: the vertex as-is
+      const auto& v = effect.mod.vertices[vi];
+      blerc.float_data.push_back(tfrag3::to_float_data(v.pos_vec, v.normal_vec, 1.f));
+      // per delta: target index + scaled delta
+      for (const auto& d : deltas) {
+        blerc.int_data.push_back(d.target_idx);
+        blerc.float_data.push_back(tfrag3::to_float_data(d.pos, d.normal, 1.f / 8192.f));
+      }
+      // terminator, then dest
+      blerc.int_data.push_back(tfrag3::Blerc::kTargetIdxTerminator);
+      blerc.int_data.push_back(vi);
+    }
+  }
+}
+
 void merc_convert_replacement(MercSwapData& out,
                               const MercExtractData& in,
                               const std::vector<tfrag3::MercVertex>& old_verts,
+                              u32 vertex_offset,
                               bool use_custom_weights) {
   out.new_model = in.new_model;
   out.new_indices = in.new_indices;
+  out.new_mod_indices = in.new_mod_indices;
   out.new_textures = in.tex_pool.textures_by_idx;
 
   // convert vertices
@@ -390,39 +574,29 @@ void merc_convert_replacement(MercSwapData& out,
 
     const auto& copy_from = find_closest(old_verts, y.x, y.y, y.z);
     auto& x = out.new_vertices.emplace_back();
-    x.pos[0] = y.x;
-    x.pos[1] = y.y;
-    x.pos[2] = y.z;
-    x.normal[0] = in.normals.at(i).x();
-    x.normal[1] = in.normals.at(i).y();
-    x.normal[2] = in.normals.at(i).z();
+    x.pos_vec = y.pos;
+    x.normal_vec = in.normals.at(i);
     if (use_custom_weights) {
-      x.weights[0] = in.joints_and_weights.at(i).weights[0];
-      x.weights[1] = in.joints_and_weights.at(i).weights[1];
-      x.weights[2] = in.joints_and_weights.at(i).weights[2];
-      x.mats[0] = in.joints_and_weights.at(i).joints[0];
-      x.mats[1] = in.joints_and_weights.at(i).joints[1];
-      x.mats[2] = in.joints_and_weights.at(i).joints[2];
+      x.weights_vec = in.joints_and_weights.at(i).weights;
+      x.joints = in.joints_and_weights.at(i).joints;
     } else {
-      x.weights[0] = copy_from.weights[0];
-      x.weights[1] = copy_from.weights[1];
-      x.weights[2] = copy_from.weights[2];
-      x.mats[0] = copy_from.mats[0];
-      x.mats[1] = copy_from.mats[1];
-      x.mats[2] = copy_from.mats[2];
+      x.weights_vec = copy_from.weights_vec;
+      x.joints = copy_from.joints;
     }
-    x.st[0] = y.s;
-    x.st[1] = y.t;
-    x.rgba[0] = in.new_colors[i][0];
-    x.rgba[1] = in.new_colors[i][1];
-    x.rgba[2] = in.new_colors[i][2];
-    x.rgba[3] = in.new_colors[i][3];
+    x.s = y.s;
+    x.t = y.t;
+    x.color.r = in.new_colors[i][0];
+    x.color.g = in.new_colors[i][1];
+    x.color.b = in.new_colors[i][2];
+    x.color.a = in.new_colors[i][3];
   }
+  fill_mod_vertices(out, in, vertex_offset);
 }
 
 void merc_convert_custom(MercSwapData& out, const MercExtractData& in) {
   out.new_model = in.new_model;
   out.new_indices = in.new_indices;
+  out.new_mod_indices = in.new_mod_indices;
   out.new_textures = in.tex_pool.textures_by_idx;
 
   // convert vertices
@@ -475,7 +649,8 @@ MercSwapData load_replacement_merc_model(tfrag3::MercModel& mdl,
   if (custom_mdl) {
     merc_convert_custom(result, extract_data);
   } else {
-    merc_convert_replacement(result, extract_data, old_verts, has_custom_weights);
+    merc_convert_replacement(result, extract_data, old_verts, current_vtx_count,
+                             has_custom_weights);
   }
 
   return result;
@@ -506,7 +681,8 @@ MercSwapData load_custom_merc_model(const std::string& name,
   if (custom_mdl) {
     merc_convert_custom(result, extract_data);
   } else {
-    merc_convert_replacement(result, extract_data, old_verts, has_custom_weights);
+    merc_convert_replacement(result, extract_data, old_verts, current_vtx_count,
+                             has_custom_weights);
   }
 
   return result;

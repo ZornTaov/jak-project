@@ -794,9 +794,9 @@ s32 find_or_add_texture_to_level(tfrag3::Level& out,
           ASSERT(false);
         }
       }
-      if (idx == left_id) {
+      if (hdr.eye_ctrl && idx == left_id) {
         *eye_out = (hdr.eye_ctrl->eye_slot * 2);
-      } else if (idx == right_id) {
+      } else if (hdr.eye_ctrl && idx == right_id) {
         *eye_out = (hdr.eye_ctrl->eye_slot * 2) + 1;
       }
     } else {
@@ -1629,6 +1629,8 @@ void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path&
     }
     lvl.merc_data.indices.insert(lvl.merc_data.indices.end(), swap_info.new_indices.begin(),
                                  swap_info.new_indices.end());
+    lvl.merc_data.indices.insert(lvl.merc_data.indices.end(), swap_info.new_mod_indices.begin(),
+                                 swap_info.new_mod_indices.end());
     lvl.merc_data.vertices.insert(lvl.merc_data.vertices.end(), swap_info.new_vertices.begin(),
                                   swap_info.new_vertices.end());
     lvl.textures.insert(lvl.textures.end(), swap_info.new_textures.begin(),

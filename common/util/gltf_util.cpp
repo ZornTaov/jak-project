@@ -303,6 +303,111 @@ std::vector<math::Vector<u8, 4>> colors_from_attribute(const tinygltf::Model& mo
   return colors;
 }
 
+std::vector<math::Vector3f> read_vec3f_attribute(const tinygltf::Model& model,
+                                                 const int accessor_idx,
+                                                 const std::string& what) {
+  const auto& attrib_accessor = model.accessors[accessor_idx];
+  const auto count = attrib_accessor.count;
+  ASSERT_MSG(attrib_accessor.type == TINYGLTF_TYPE_VEC3, fmt::format("{} wasn't vec3", what));
+  ASSERT_MSG(attrib_accessor.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT,
+             fmt::format("{} wasn't float", what));
+
+  std::vector<math::Vector3f> result;
+  if (attrib_accessor.bufferView >= 0) {
+    // if there's a buffer, use it...
+    const auto& buffer_view = model.bufferViews[attrib_accessor.bufferView];
+    const auto& buffer = model.buffers[buffer_view.buffer];
+    const auto data_ptr = buffer.data.data() + buffer_view.byteOffset + attrib_accessor.byteOffset;
+    const auto byte_stride = attrib_accessor.ByteStride(buffer_view);
+
+    result = extract_vec3f(data_ptr, count, byte_stride);
+  } else {
+    // ...otherwise, fill with zero'd vectors.
+    result.resize(count, math::Vector3f::zero());
+  }
+
+  if (attrib_accessor.sparse.isSparse) {
+    const auto& sparse = attrib_accessor.sparse;
+    const auto& buffer_view = model.bufferViews[sparse.indices.bufferView];
+    const auto& buffer = model.buffers[buffer_view.buffer];
+    const auto data_ptr = buffer.data.data() + buffer_view.byteOffset + sparse.indices.byteOffset;
+
+    std::vector<u32> indices;
+    switch (sparse.indices.componentType) {
+      case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+        indices = index_list_to_u32<u8>(data_ptr, sparse.count, 0, sizeof(u8));
+        break;
+      case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+        indices = index_list_to_u32<u16>(data_ptr, sparse.count, 0, sizeof(u16));
+        break;
+      case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+        indices = index_list_to_u32<u32>(data_ptr, sparse.count, 0, sizeof(u32));
+        break;
+      default:
+        ASSERT_MSG(false, fmt::format("{} unsupported component type for sparse indices", what));
+    }
+    const auto& values_view = model.bufferViews[sparse.values.bufferView];
+    const auto& values_buffer = model.buffers[values_view.buffer];
+    const auto values_ptr =
+        values_buffer.data.data() + values_view.byteOffset + sparse.values.byteOffset;
+    auto values = extract_vec3f(values_ptr, sparse.count, sizeof(math::Vector3f));
+
+    for (int i = 0; i < sparse.count; i++) {
+      ASSERT(indices[i] < count);
+      result[indices[i]] = values[i];
+    }
+  }
+  return result;
+}
+
+std::vector<std::vector<MorphDelta>> gltf_morph_deltas(const tinygltf::Model& model,
+                                                       const tinygltf::Primitive& prim,
+                                                       const math::Matrix4f& w_T_local,
+                                                       const std::string& debug_name) {
+  std::vector<std::vector<MorphDelta>> result;
+  auto vtx_count = model.accessors[prim.attributes.at("POSITION")].count;
+  result.resize(vtx_count);
+  for (size_t ti = 0; ti < prim.targets.size(); ti++) {
+    const auto& t = prim.targets[ti];
+    // gather up positions
+    auto position_attrib = t.find("POSITION");
+    ASSERT_MSG(position_attrib != t.end(),
+               fmt::format("{}: Did not find target {} position attribute.", debug_name, ti));
+    const auto& attrib_accessor = model.accessors[position_attrib->second];
+    ASSERT_MSG(
+        attrib_accessor.count == vtx_count,
+        fmt::format("{}: target {} POSITION count doesn't match vertex count", debug_name, ti));
+
+    auto mesh_verts = read_vec3f_attribute(model, position_attrib->second,
+                                           fmt::format("{}: target {} POSITION", debug_name, ti));
+
+    // gather up normals if they exist
+    auto normal_attrib = t.find("NORMAL");
+    std::vector<math::Vector3f> normal_verts;
+    if (normal_attrib != t.end()) {
+      const auto& norm_attrib_accessor = model.accessors[normal_attrib->second];
+      ASSERT_MSG(
+          norm_attrib_accessor.count == vtx_count,
+          fmt::format("{}: target {} NORMAL count doesn't match vertex count", debug_name, ti));
+      normal_verts = read_vec3f_attribute(model, normal_attrib->second,
+                                          fmt::format("{}: target {} NORMAL", debug_name, ti));
+    }
+    // add the positions and normals to the result.
+    for (size_t vi = 0; vi < vtx_count; vi++) {
+      auto pos = mesh_verts[vi];
+      auto norm = normal_verts.empty() ? math::Vector3f::zero() : normal_verts[vi];
+      // if pos and norm are zero'd, skip as this vert isn't affected by this blend target
+      if (pos.approx_equal(math::Vector3f::zero()) && norm.approx_equal(math::Vector3f::zero())) {
+        continue;
+      }
+      pos = (w_T_local * math::Vector4f(pos.x(), pos.y(), pos.z(), 0.0f)).xyz() * 4096.0f;
+      norm = (w_T_local * math::Vector4f(norm.x(), norm.y(), norm.z(), 0.0f)).xyz();
+      result[vi].push_back({(u32)ti, pos, norm});
+    }
+  }
+  return result;
+}
+
 /*!
  * Extract positions, colors, and normals from a mesh.
  */
@@ -320,7 +425,7 @@ ExtractedVertices gltf_vertices(const tinygltf::Model& model,
     const auto& position_attrib = attributes.find("POSITION");
     ASSERT_MSG(position_attrib != attributes.end(), "Did not find position attribute.");
 
-    const auto attrib_accessor = model.accessors[position_attrib->second];
+    const auto& attrib_accessor = model.accessors[position_attrib->second];
     const auto& buffer_view = model.bufferViews[attrib_accessor.bufferView];
     const auto& buffer = model.buffers[buffer_view.buffer];
     const auto data_ptr = buffer.data.data() + buffer_view.byteOffset + attrib_accessor.byteOffset;
