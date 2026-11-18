@@ -1732,6 +1732,10 @@ void add_merc(const tfrag3::Level& level,
 
   const auto& art = art_data.find(mmodel.name);
   int node_idx = (int)model.nodes.size();
+  model.nodes.reserve(node_idx + 1 +
+                      ((art != art_data.end() && !art->second.joint_group.empty())
+                           ? art->second.joint_group.size()
+                           : 0));
   auto& node = model.nodes.emplace_back();
   model.scenes.at(0).nodes.push_back(node_idx);
   node.name = mmodel.name;
