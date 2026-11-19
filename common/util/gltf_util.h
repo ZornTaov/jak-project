@@ -63,7 +63,8 @@ std::vector<u32> gltf_index_buffer(const tinygltf::Model& model, int indices_idx
 std::vector<math::Matrix4f> extract_mat4(const tinygltf::Model& model, int accessor_idx);
 std::vector<JointsAndWeights> extract_and_flatten_joints_and_weights(
     const tinygltf::Model& model,
-    const tinygltf::Primitive& prim);
+    const tinygltf::Primitive& prim,
+    const std::vector<int>& joint_remap = {});
 
 struct ExtractedVertices {
   std::vector<tfrag3::PreloadedVertex> vtx;

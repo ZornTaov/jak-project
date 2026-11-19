@@ -1601,7 +1601,10 @@ void create_modifiable_vertex_data(
   }
 }
 
-void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path& mdl_path) {
+void replace_model(tfrag3::Level& lvl,
+                   tfrag3::MercModel& model,
+                   const fs::path& mdl_path,
+                   const std::map<std::string, level_tools::ArtData>& art_data_map) {
   if (model.max_bones < 100) {
     auto lvl_name = lvl.level_name == "" ? "common" : lvl.level_name;
     lg::info("Replacing {} for {}: {} effects, {} max bones, {} max draws\n", model.name, lvl_name,
@@ -1621,7 +1624,7 @@ void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path&
 
     auto swap_info = load_replacement_merc_model(model, lvl.merc_data.indices.size(),
                                                  lvl.merc_data.vertices.size(), lvl.textures.size(),
-                                                 mdl_path.string(), old_verts, false);
+                                                 mdl_path.string(), old_verts, false, art_data_map);
     model = swap_info.new_model;
     size_t old_start = lvl.merc_data.vertices.size();
     for (auto& ind : swap_info.new_indices) {
@@ -1667,7 +1670,8 @@ void extract_merc(const ObjectFileData& ag_data,
                   tfrag3::Level& out,
                   bool dump_level,
                   GameVersion version,
-                  MercSwapInfo& swapped_info) {
+                  MercSwapInfo& swapped_info,
+                  const std::map<std::string, level_tools::ArtData>& art_data_map) {
   if (dump_level) {
     file_util::create_dir_if_needed(file_util::get_file_path({"debug_out/merc"}));
   }
@@ -1807,7 +1811,7 @@ void extract_merc(const ObjectFileData& ag_data,
                                    [&](const auto& m) { return m.name == ctrl.name; });
             if (it != out.merc_data.models.end()) {
               auto& model = *it;
-              replace_model(out, model, mdl_path);
+              replace_model(out, model, mdl_path, art_data_map);
               swapped_info.add_to_swapped_list(ctrl.name, out.level_name);
             }
           }

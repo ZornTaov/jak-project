@@ -11,16 +11,39 @@ void extract(tfrag3::MercModel& mdl,
              u32 index_offset,
              u32 vertex_offset,
              u32 tex_offset,
-             bool& has_custom_weights) {
+             bool& has_custom_weights,
+             const std::map<std::string, level_tools::ArtData>& art_data_map) {
   ASSERT(out.new_vertices.empty());
 
   std::map<int, tfrag3::MercDraw> draw_by_material;
   int mesh_count = 0;
   int prim_count = 0;
   int joints = 3;
+  std::vector<int> joint_remap;
   auto skin_idx = find_single_skin(model, all_nodes);
   if (skin_idx) {
     joints += get_joint_count(model, *skin_idx);
+    auto art = art_data_map.find(mdl.name);
+    if (art != art_data_map.end()) {
+      std::unordered_map<std::string, int> game_idx_by_name;
+      const auto& game_bones = art->second.joint_group;
+      for (int g = 0; g < (int)game_bones.size(); g++) {
+        game_idx_by_name[game_bones[g].name] = g;
+      }
+
+      const auto& skin = model.skins[*skin_idx];
+      joint_remap.resize(skin.joints.size());
+      for (size_t i = 0; i < skin.joints.size(); i++) {
+        const auto& name = model.nodes[skin.joints[i]].name;
+        auto joint = game_idx_by_name.find(name);
+        if (joint != game_idx_by_name.end()) {
+          joint_remap[i] = joint->second;
+        } else {
+          lg::warn("{}: joint name '{}' not found", mdl.name, name);
+          joint_remap[i] = (int)i;
+        }
+      }
+    }
   }
   bool copy_eye_draws = false;
   bool copy_mod_draws = false;
@@ -70,7 +93,7 @@ void extract(tfrag3::MercModel& mdl,
 
           if (prim.attributes.count("JOINTS_0") && prim.attributes.count("WEIGHTS_0")) {
             auto joints_and_weights =
-                gltf_util::extract_and_flatten_joints_and_weights(model, prim);
+                gltf_util::extract_and_flatten_joints_and_weights(model, prim, joint_remap);
             ASSERT(joints_and_weights.size() == verts.vtx.size());
             out.joints_and_weights.insert(out.joints_and_weights.end(), joints_and_weights.begin(),
                                           joints_and_weights.end());
@@ -624,13 +647,15 @@ void merc_convert_custom(MercSwapData& out, const MercExtractData& in) {
   }
 }
 
-MercSwapData load_replacement_merc_model(tfrag3::MercModel& mdl,
-                                         u32 current_idx_count,
-                                         u32 current_vtx_count,
-                                         u32 current_tex_count,
-                                         const std::string& path,
-                                         const std::vector<tfrag3::MercVertex>& old_verts,
-                                         bool custom_mdl) {
+MercSwapData load_replacement_merc_model(
+    tfrag3::MercModel& mdl,
+    u32 current_idx_count,
+    u32 current_vtx_count,
+    u32 current_tex_count,
+    const std::string& path,
+    const std::vector<tfrag3::MercVertex>& old_verts,
+    bool custom_mdl,
+    const std::map<std::string, level_tools::ArtData>& art_data_map) {
   MercSwapData result;
   lg::info("Reading gltf mesh: {}", path);
   tinygltf::TinyGLTF loader;
@@ -645,7 +670,7 @@ MercSwapData load_replacement_merc_model(tfrag3::MercModel& mdl,
   MercExtractData extract_data;
   auto has_custom_weights = false;
   extract(mdl, extract_data, model, all_nodes, current_idx_count, current_vtx_count,
-          current_tex_count, has_custom_weights);
+          current_tex_count, has_custom_weights, art_data_map);
   if (custom_mdl) {
     merc_convert_custom(result, extract_data);
   } else {
