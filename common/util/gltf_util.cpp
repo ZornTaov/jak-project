@@ -877,7 +877,7 @@ void setup_alpha_from_material(const tinygltf::Material& material, DrawMode* mod
     mode->enable_at();
     mode->set_alpha_test(DrawMode::AlphaTest::GEQUAL);
     mode->set_alpha_fail(GsTest::AlphaFail::KEEP);
-    mode->set_aref(material.alphaCutoff * 127);
+    mode->set_aref(std::lround(material.alphaCutoff * 127));
   } else if (material.alphaMode == "BLEND") {
     mode->enable_ab();
     mode->set_alpha_blend(DrawMode::AlphaBlend::SRC_DST_SRC_DST);

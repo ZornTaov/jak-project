@@ -168,6 +168,9 @@ void extract(tfrag3::MercModel& mdl,
              fmt::format("{}: model has no effects, cannot place materials", mdl.name));
   // Size the effects vector to the number of effects in the original model, so we can index into it
   out.new_model.effects.resize(mdl.effects.size());
+  // transfer over ignore_alpha from old effects
+  for (size_t i = 0; i < mdl.effects.size(); i++)
+    out.new_model.effects[i].ignore_alpha = mdl.effects[i].ignore_alpha;
 
   // Add the draw for mat_idx to effect effect_idx. The envmap path is only used when both the
   // material and the effect are envmap, so an effect never mixes the two kinds of draw.
@@ -377,6 +380,7 @@ void extract(tfrag3::MercModel& mdl,
   if (copy_eye_draws || copy_mod_draws) {
     for (auto& old_eff : mdl.effects) {
       tfrag3::MercEffect eff;
+      eff.ignore_alpha = old_eff.ignore_alpha;
       bool has_eye_draw = false;
       if (copy_eye_draws) {
         for (auto& draw : old_eff.all_draws) {

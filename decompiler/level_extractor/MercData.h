@@ -209,6 +209,7 @@ struct MercExtraInfo {
 constexpr int kTextureScrollEffectBit = 1;
 constexpr int kTransEffectBit = 2;   // true in 1 and 2
 constexpr int kRippleEffectBit = 4;  // true in jak 1 and jak 2
+constexpr int kIgnoreAlphaEffectBit = 128;
 
 struct MercEffect {
   //((frag-geo         merc-fragment          :offset-assert 0) ;; ?

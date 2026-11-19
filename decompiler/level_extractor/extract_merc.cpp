@@ -1722,6 +1722,14 @@ void extract_merc(const ObjectFileData& ag_data,
       pc_effect.has_envmap = effect.has_envmap;
       pc_effect.envmap_texture = effect.envmap_texture;
       pc_effect.envmap_mode = effect.envmap_mode;
+      // merc2.frag discards alpha < 0.128 unless the game sets ignore-alpha for the effect.
+      // jak1 decides at runtime: envmap effects ignore alpha, plain ones don't (bones.gc).
+      // jak2/3 use the ignore-alpha effect bit (merc-h.gc: effect-bits ignore-alpha = bit 7).
+      if (version == GameVersion::Jak1) {
+        pc_effect.ignore_alpha = effect.has_envmap;
+      } else {
+        pc_effect.ignore_alpha = ctrls[ci].effects[ei].effect_bits & kIgnoreAlphaEffectBit;
+      }
       u32 first_vertex = out.merc_data.vertices.size();
       for (auto& vtx : effect.vertices) {
         auto cvtx = convert_vertex(vtx, ctrl.header.xyz_scale);

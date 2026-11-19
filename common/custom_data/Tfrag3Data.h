@@ -18,7 +18,7 @@ namespace tfrag3 {
 // - if changing any large things (vertices, vis, bvh, colors, textures) update get_memory_usage
 // - if adding a new category to the memory usage, update extract_level to print it.
 
-constexpr int TFRAG3_VERSION = 43;
+constexpr int TFRAG3_VERSION = 44;
 
 enum MemoryUsageCategory {
   TEXTURE,
@@ -661,6 +661,7 @@ struct MercEffect {
   u32 envmap_texture;
   bool has_envmap = false;
   bool has_mod_draw = false;
+  bool ignore_alpha = false;
   void serialize(Serializer& ser);
   void memory_usage(MemoryUsageTracker* tracker) const;
 };

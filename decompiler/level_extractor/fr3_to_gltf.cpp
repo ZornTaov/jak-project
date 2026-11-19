@@ -711,7 +711,8 @@ int add_material_for_tex(const tfrag3::Level& level,
                          int tex_idx,
                          TexImageMap& tex_image_map,
                          const DrawMode& draw_mode,
-                         const EnvmapInfo* envmap = nullptr) {
+                         const EnvmapInfo* envmap = nullptr,
+                         std::optional<bool> merc_ignore_alpha = std::nullopt) {
   if (tex_idx < 0) {
     return 0;
   }
@@ -727,9 +728,18 @@ int add_material_for_tex(const tfrag3::Level& level,
   mat.pbrMetallicRoughness.baseColorTexture.index = add_gltf_texture(
       model, add_image_for_tex(level, model, tex_idx, tex_image_map, TexImageKind::RGBA),
       tex.debug_name, draw_mode);
-  mat.alphaMode = draw_mode.get_ab_enable() ? "BLEND" : "MASK";
-  // the foreground and background renderers both use this cutoff
-  mat.alphaCutoff = (float)0x26 / 255.f;
+  mat.alphaMode =
+      draw_mode.get_ab_enable() ? "BLEND"
+      : draw_mode.get_at_enable() && draw_mode.get_alpha_test() == DrawMode::AlphaTest::GEQUAL
+          ? "MASK"
+          : "OPAQUE";
+  // merc ignores the draw mode's alpha test: merc2.frag discards alpha < 0.128 unless the
+  // effect has ignore-alpha, so non-blended merc is either a 0.128 cutout or opaque
+  if (merc_ignore_alpha && mat.alphaMode != "BLEND")
+    mat.alphaMode = *merc_ignore_alpha ? "OPAQUE" : "MASK";
+  // background renderers use aref / 127 (glb alpha is doubled, 255 = PS2 128); merc ignores it
+  if (mat.alphaMode == "MASK")
+    mat.alphaCutoff = merc_ignore_alpha ? 0.128f : draw_mode.get_aref() / 127.f;
   // metallic is reserved for the envmap strength below
   mat.pbrMetallicRoughness.metallicFactor = 0.0;
 
@@ -737,6 +747,7 @@ int add_material_for_tex(const tfrag3::Level& level,
     mat.name = tex.debug_name + "-envmap";
     if (!blends_with_src_alpha(draw_mode)) {
       mat.alphaMode = "OPAQUE";
+      mat.alphaCutoff = 0.5;
     }
     mat.pbrMetallicRoughness.metallicFactor = 1.0;
     mat.pbrMetallicRoughness.roughnessFactor = 1.0;
@@ -1847,7 +1858,8 @@ void add_merc(const tfrag3::Level& level,
         const auto it = anim_slot_to_base_tex.find(-(tex_id + 1));
         tex_id = it != anim_slot_to_base_tex.end() ? it->second : draw.tree_tex_id;
       }
-      prim.material = add_material_for_tex(level, model, tex_id, tex_image_map, draw.mode, envmap);
+      prim.material = add_material_for_tex(level, model, tex_id, tex_image_map, draw.mode, envmap,
+                                           effect.ignore_alpha);
 
       if (prim.material > 0) {
         model.materials[prim.material].extras = tinygltf::Value(tinygltf::Value::Object{

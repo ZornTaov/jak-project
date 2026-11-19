@@ -549,6 +549,7 @@ void MercEffect::serialize(Serializer& ser) {
   ser.from_ptr(&envmap_texture);
   ser.from_ptr(&has_envmap);
   ser.from_ptr(&has_mod_draw);
+  ser.from_ptr(&ignore_alpha);
 }
 
 void MercModel::serialize(Serializer& ser) {
